@@ -358,6 +358,7 @@ def test_reset_endpoint_returns_generic_errors(fake_hermes_runtime):
     }
     summary = payload["summary"]
     assert set(summary) == {
+        "version",
         "updated_at",
         "profiles",
         "providers",
