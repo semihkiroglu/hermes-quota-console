@@ -71,6 +71,6 @@ jobs:
               '```' \
               '' > /tmp/release-install.md
             cat /tmp/release-install.md /tmp/release-notes.md > /tmp/release.md
-            gh release create "$TAG" --notes-file /tmp/release.md
+            gh release create "$TAG" --title "$TAG" --notes-file /tmp/release.md
             echo "Released $TAG"
           fi
