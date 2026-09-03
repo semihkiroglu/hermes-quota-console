@@ -108,18 +108,55 @@ function moveProviderId(ids, fromId, toId, edge) {
 // Summarise a /summary payload into the shell banner state (module scope
 // so Node fixtures can exercise the aggregation without a React SDK).
 // Returns null when nothing needs attention (the banner stays hidden),
-// otherwise { level: "exhausted" | "low", count, names[], extra } where
+// otherwise { level: "critical" | "low", count, names[], extra } where
 // ``names`` holds the first provider labels and ``extra`` the remaining
-// count beyond three. Exhausted wins over low: one strip, red first.
+// count beyond three.
+//
+// Two attention families feed the banner:
+//   - quota alerts (summary.alerts): exhausted balance/window or a
+//     window/balance under its configured threshold -> the existing
+//     top-alert inputs, already aggregated by the API layer;
+//   - provider status (provider_overview): profiles blocked by Hermes
+//     (rate_limited/degraded — reset action exists) or failing auth
+//     (auth_failed — credential problem, no reset offered).
+// Unavailable snapshots (a transient fetch failure, no operator action)
+// never reach the banner: the card already shows the state and the next
+// poll usually clears it. Critical (red) wins over low (yellow): one
+// strip, red first.
 function bannerAlertFromSummary(summary) {
   if (!summary || typeof summary !== "object") return null;
   const alerts = (summary.alerts && typeof summary.alerts === "object") ? summary.alerts : {};
   const exhausted = Array.isArray(alerts.exhausted) ? alerts.exhausted : [];
   const low = Array.isArray(alerts.low) ? alerts.low : [];
+  const overview = Array.isArray(summary.provider_overview) ? summary.provider_overview : [];
+
+  const critical = [];
+  exhausted.forEach(function (entry) {
+    if (entry && typeof entry.provider === "string" && entry.provider) critical.push(entry.provider);
+  });
+  overview.forEach(function (bucket) {
+    if (!bucket || typeof bucket !== "object") return;
+    const availability = bucket.provider_availability;
+    const status = availability && typeof availability === "object" ? availability.status : null;
+    if (status === "rate_limited" || status === "degraded" || status === "auth_failed") {
+      const label = String(bucket.label || bucket.id || "");
+      if (label) critical.push(label);
+    }
+  });
+  // De-duplicate provider labels while preserving first-seen order.
+  const seen = {};
+  const uniqueCritical = critical.filter(function (label) {
+    if (seen[label]) return false;
+    seen[label] = true;
+    return true;
+  });
+
   function describe(items, level) {
     if (!items.length) return null;
     const names = items.slice(0, 3).map(function (entry) {
-      return entry && typeof entry.provider === "string" ? entry.provider : "unknown";
+      return typeof entry === "string"
+        ? entry
+        : (entry && typeof entry.provider === "string" ? entry.provider : "unknown");
     });
     return {
       level: level,
@@ -128,7 +165,7 @@ function bannerAlertFromSummary(summary) {
       extra: items.length > 3 ? items.length - 3 : 0,
     };
   }
-  return describe(exhausted, "exhausted") || describe(low, "low") || null;
+  return describe(uniqueCritical, "critical") || describe(low, "low") || null;
 }
 
 (function () {
@@ -1455,8 +1492,8 @@ function bannerAlertFromSummary(summary) {
 
     if (!alert) return null;
     const names = alert.names.join(", ") + (alert.extra ? " +" + alert.extra + " more" : "");
-    const copy = alert.level === "exhausted"
-      ? alert.count + " provider(s) out of quota (" + names + ")"
+    const copy = alert.level === "critical"
+      ? alert.count + " provider(s) need attention (" + names + ")"
       : alert.count + " provider(s) running low (" + names + ")";
     return h(
       "a",

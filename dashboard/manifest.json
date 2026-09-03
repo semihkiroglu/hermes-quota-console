@@ -3,7 +3,7 @@
   "label": "Quota Console",
   "description": "Profile-aware quota, balance, and model status for Hermes Agent.",
   "icon": "BarChart3",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "tab": {
     "path": "/quota-console",
     "position": "after:analytics"
