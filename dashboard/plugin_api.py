@@ -115,9 +115,10 @@ def _plugin_version() -> Optional[str]:
 # GitHub releases API directly without exposing the dashboard session
 # token through the plugin's authenticated fetch, so the check runs
 # server-side against a public, no-auth endpoint and caches the answer
-# for one hour (the GitHub anonymous rate limit is per-IP and small).
+# for 15 minutes (the GitHub anonymous rate limit is per-IP and small;
+# 15 min keeps the footer fresh while staying far below the budget).
 _LATEST_RELEASE_API = "https://api.github.com/repos/semihkiroglu/hermes-quota-console/releases/latest"
-_LATEST_RELEASE_TTL_SECONDS = 3600.0
+_LATEST_RELEASE_TTL_SECONDS = 900.0
 _LATEST_RELEASE_CACHE: dict[str, Any] = {"at": 0.0, "value": None}
 
 

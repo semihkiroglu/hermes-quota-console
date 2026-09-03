@@ -228,3 +228,21 @@ def test_release_update_null_when_missing():
     assert _release_update(None, "v0.1.2") is None
     assert _release_update("0.1.1", None) is None
     assert _release_update(None, None) is None
+
+
+def test_release_update_null_when_latest_is_older():
+    # A dev checkout ahead of the newest published tag must NOT be
+    # reported as an update (this was the bug: plain inequality check).
+    assert _release_update("0.1.3", "v0.1.2") is None
+    assert _release_update("0.2.0", "v0.1.9") is None
+
+
+def test_release_update_uses_numeric_version_order():
+    # String comparison would treat "1.10.0" < "1.9.0"; semver must not.
+    assert _release_update("1.9.0", "v1.10.0") == "v1.10.0"
+    assert _release_update("1.10.0", "v1.9.0") is None
+
+
+def test_release_update_fail_closed_on_garbage():
+    assert _release_update("not-a-version", "v0.1.2") is None
+    assert _release_update("0.1.1", "newest") is None
