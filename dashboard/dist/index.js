@@ -180,6 +180,16 @@ function releaseUpdate(currentVersion, latestRelease) {
   return norm(latestRelease) !== norm(currentVersion) ? String(latestRelease) : null;
 }
 
+// Dismissable in-page update alert state. Returns the release tag to
+// show (a newer tag the operator has not dismissed yet) or null.
+// ``dismissedTag`` is whatever the operator closed before — the same
+// tag stays hidden, a newer one re-appears. Pure, Node-testable.
+function updateAlertVisible(currentVersion, latestRelease, dismissedTag) {
+  const update = releaseUpdate(currentVersion, latestRelease);
+  if (!update) return null;
+  return update === dismissedTag ? null : update;
+}
+
 (function () {
   "use strict";
 
@@ -801,6 +811,15 @@ function releaseUpdate(currentVersion, latestRelease) {
     // Drop indicator: the card id currently hovered while dragging plus
     // the edge ("before" | "after") where the dragged card would land.
     const [dropTarget, setDropTarget] = useState(null);
+    // Release-tag the operator dismissed in this browser. The in-page
+    // update alert stays hidden for that tag and re-appears when a
+    // newer release exists.
+    const [dismissedUpdate, setDismissedUpdate] = useState(function () {
+      try {
+        return window.localStorage.getItem("quota-console-dismissed-update") || null;
+      } catch (error) { /* private mode or unavailable storage: alert shows */ }
+      return null;
+    });
     const mounted = useRef(true);
 
     useEffect(function () {
@@ -1007,6 +1026,18 @@ function releaseUpdate(currentVersion, latestRelease) {
     const exhaustedItems = Array.isArray(alerts.exhausted) ? alerts.exhausted : [];
     const lowItems = Array.isArray(alerts.low) ? alerts.low : [];
 
+    // Dismissable in-page update notice: newer release exists and the
+    // operator has not closed this exact tag in this browser. Dismissing
+    // stores the tag; a later release re-opens the notice.
+    const updateTag = updateAlertVisible(data.version, data.latest_release, dismissedUpdate);
+    function dismissUpdate() {
+      if (!updateTag) return;
+      try {
+        window.localStorage.setItem("quota-console-dismissed-update", updateTag);
+      } catch (error) { /* storage unavailable: keep it visible next time */ }
+      setDismissedUpdate(updateTag);
+    }
+
     return h(
       "div",
       { className: "usages-page" },
@@ -1084,6 +1115,33 @@ function releaseUpdate(currentVersion, latestRelease) {
                 className: "usages-action-message-close",
                 onClick: function () { setActionMessage(null); },
                 "aria-label": "Dismiss message",
+              },
+              "\u00D7",
+            ),
+          )
+        : null,
+      updateTag
+        ? h(
+            "div",
+            { className: "usages-alert usages-alert--update", role: "status" },
+            h("span", { className: "usages-alert-icon" }, "\u2726"),
+            h(
+              "span",
+              { className: "usages-alert-text" },
+              "New version " + updateTag.replace(/^v/, "") + " available.",
+            ),
+            h(
+              "a",
+              { className: "usages-alert-link", href: "https://github.com/semihkiroglu/hermes-quota-console/releases", target: "_blank", rel: "noopener noreferrer" },
+              "View releases",
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "usages-alert-dismiss",
+                onClick: dismissUpdate,
+                "aria-label": "Dismiss update notice",
               },
               "\u00D7",
             ),
@@ -1433,8 +1491,15 @@ function releaseUpdate(currentVersion, latestRelease) {
           releaseUpdate(data.version, data.latest_release)
             ? h(
                 "a",
-                { className: "usages-footnote-update", href: "https://github.com/semihkiroglu/hermes-quota-console/releases", target: "_blank", rel: "noopener noreferrer" },
-                "\u2191 v" + releaseUpdate(data.version, data.latest_release).replace(/^v/, "") + " available \u00b7 view releases",
+                {
+                  className: "usages-footnote-update",
+                  href: "https://github.com/semihkiroglu/hermes-quota-console/releases",
+                  target: "_blank",
+                  rel: "noopener noreferrer",
+                  title: "New release " + releaseUpdate(data.version, data.latest_release) + " available",
+                  "aria-label": "New release " + releaseUpdate(data.version, data.latest_release) + " available",
+                },
+                h("span", { className: "usages-footnote-update-dot" }),
               )
             : null,
         ),
