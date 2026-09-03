@@ -168,16 +168,32 @@ function bannerAlertFromSummary(summary) {
   return describe(uniqueCritical, "critical") || describe(low, "low") || null;
 }
 
-// Returns the latest published release tag when it differs from the
-// running version (normalised, so "v0.1.2" == "0.1.2"), or null when
-// there is nothing newer / the check is unavailable. Pure, so Node
-// fixtures can exercise the comparison without a React SDK.
+// Semantic version comparison: returns true when ``left`` is strictly
+// newer than ``right`` (treats "1.10.0" > "1.9.0", which a string
+// comparison would get wrong). Non-numeric input makes the check
+// fail-closed: the caller shows nothing rather than a bogus update.
+function versionNewerThan(left, right) {
+  const parse = function (value) {
+    const match = String(value).trim().replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)/);
+    return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+  };
+  const a = parse(left);
+  const b = parse(right);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] !== b[i]) return a[i] > b[i];
+  }
+  return false;
+}
+
+// Returns the latest published release tag when it is strictly newer
+// than the running version, or null when the running version is up to
+// date, newer than the latest release (e.g. a dev checkout ahead of the
+// latest tag), or the check is unavailable. Pure, so Node fixtures can
+// exercise the comparison without a React SDK.
 function releaseUpdate(currentVersion, latestRelease) {
   if (!currentVersion || !latestRelease) return null;
-  const norm = function (value) {
-    return String(value).trim().replace(/^v/, "");
-  };
-  return norm(latestRelease) !== norm(currentVersion) ? String(latestRelease) : null;
+  return versionNewerThan(latestRelease, currentVersion) ? String(latestRelease) : null;
 }
 
 // Dismissable in-page update alert state. Returns the release tag to
