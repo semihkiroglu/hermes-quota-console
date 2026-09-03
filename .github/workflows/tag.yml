@@ -49,6 +49,28 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists; skipping"
           else
-            gh release create "$TAG" --generate-notes
+            # Release notes: short install/update guide on top of the
+            # auto-generated changelog from merged pull requests.
+            gh api -X POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+              -f "tag_name=$TAG" -f "target_commitish=$GITHUB_SHA" \
+              -q .body > /tmp/release-notes.md
+            printf '%s\n' \
+              '## Install & update' \
+              '' \
+              'Stable branch, one clone then pull to update:' \
+              '' \
+              '```bash' \
+              'git clone -b stable https://github.com/semihkiroglu/hermes-quota-console.git ~/.hermes/plugins/quota-console' \
+              'git -C ~/.hermes/plugins/quota-console pull --ff-only' \
+              '```' \
+              '' \
+              'Restart the dashboard after updating (Python changes require it):' \
+              '' \
+              '```bash' \
+              'systemctl --user restart hermes-dashboard.service' \
+              '```' \
+              '' > /tmp/release-install.md
+            cat /tmp/release-install.md /tmp/release-notes.md > /tmp/release.md
+            gh release create "$TAG" --notes-file /tmp/release.md
             echo "Released $TAG"
           fi
