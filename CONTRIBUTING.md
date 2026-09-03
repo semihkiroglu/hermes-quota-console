@@ -14,9 +14,14 @@ by the working contract in [AGENTS.md](AGENTS.md).
     contributions open PRs here (the repository default makes this the
     natural target); after the gate (section 2) passes and a maintainer
     approves, the PR merges.
-  - **`stable`** — the release line, maintainer-only. Changes reach it only
-    through the maintainer's promote step; a PR opened against `stable` by
-    anyone else is closed automatically and pointed at `unstable`.
+  - **`stable`** — the release line, maintainer-only. Changes reach it
+    through a **direct fast-forward push** from `unstable`
+    (`git push origin unstable:stable`), so both branches always point at
+    the identical commit and never drift apart. There is no separate
+    "promote PR": a PR opened against `stable` by anyone else is closed
+    automatically and pointed at `unstable`. `stable` protection rejects
+    deletions and non-fast-forward pushes, so history can never be
+    rewritten.
 - The live Hermes plugin checkout lives in a separate directory
   (`~/.hermes/plugins/quota-console`) and is a copy of `stable`; pull there
   only when a release lands.
