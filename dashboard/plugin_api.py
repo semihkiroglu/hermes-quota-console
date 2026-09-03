@@ -111,6 +111,43 @@ def _plugin_version() -> Optional[str]:
     return None
 
 
+# Latest-release check for the footer. Web browsers cannot call the
+# GitHub releases API directly without exposing the dashboard session
+# token through the plugin's authenticated fetch, so the check runs
+# server-side against a public, no-auth endpoint and caches the answer
+# for one hour (the GitHub anonymous rate limit is per-IP and small).
+_LATEST_RELEASE_API = "https://api.github.com/repos/semihkiroglu/hermes-quota-console/releases/latest"
+_LATEST_RELEASE_TTL_SECONDS = 3600.0
+_LATEST_RELEASE_CACHE: dict[str, Any] = {"at": 0.0, "value": None}
+
+
+def _latest_release() -> Optional[str]:
+    """Return the newest published release tag (e.g. ``v0.1.3``) or ``None``.
+
+    Fail-closed: network errors, rate limits, or a missing release all
+    yield ``None`` so the footer simply shows nothing when the check is
+    unavailable. The result is cached for an hour to stay inside the
+    anonymous GitHub rate budget.
+    """
+    now = time.monotonic()
+    cache = _LATEST_RELEASE_CACHE.get("value")
+    if cache is not None and now - float(_LATEST_RELEASE_CACHE.get("at", 0.0)) < _LATEST_RELEASE_TTL_SECONDS:
+        return cache
+    try:
+        with httpx.Client(timeout=5.0, follow_redirects=False) as client:
+            response = client.get(_LATEST_RELEASE_API, headers={"Accept": "application/json"})
+            response.raise_for_status()
+            payload = response.json()
+        tag = str(payload.get("tag_name") or "") if isinstance(payload, dict) else ""
+    except (httpx.HTTPError, ValueError, TypeError):
+        return None
+    with _CACHE_LOCK:
+        if tag:
+            _LATEST_RELEASE_CACHE["at"] = now
+            _LATEST_RELEASE_CACHE["value"] = tag
+    return tag or None
+
+
 class UsageProviderError(RuntimeError):
     """Expected provider/auth/response failure without sensitive details."""
 
@@ -841,6 +878,7 @@ def _build_summary() -> dict[str, Any]:
     alerts = _bucket_alerts(overview)
     return {
         "version": _plugin_version(),
+        "latest_release": _latest_release(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "profiles": profile_cards,
         "providers": provider_cards,

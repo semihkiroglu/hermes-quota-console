@@ -168,6 +168,18 @@ function bannerAlertFromSummary(summary) {
   return describe(uniqueCritical, "critical") || describe(low, "low") || null;
 }
 
+// Returns the latest published release tag when it differs from the
+// running version (normalised, so "v0.1.2" == "0.1.2"), or null when
+// there is nothing newer / the check is unavailable. Pure, so Node
+// fixtures can exercise the comparison without a React SDK.
+function releaseUpdate(currentVersion, latestRelease) {
+  if (!currentVersion || !latestRelease) return null;
+  const norm = function (value) {
+    return String(value).trim().replace(/^v/, "");
+  };
+  return norm(latestRelease) !== norm(currentVersion) ? String(latestRelease) : null;
+}
+
 (function () {
   "use strict";
 
@@ -1418,6 +1430,13 @@ function bannerAlertFromSummary(summary) {
           data.version
             ? h("span", { className: "usages-footnote-version" }, "v" + data.version)
             : null,
+          releaseUpdate(data.version, data.latest_release)
+            ? h(
+                "a",
+                { className: "usages-footnote-update", href: "https://github.com/semihkiroglu/hermes-quota-console/releases", target: "_blank", rel: "noopener noreferrer" },
+                "\u2191 v" + releaseUpdate(data.version, data.latest_release).replace(/^v/, "") + " available \u00b7 view releases",
+              )
+            : null,
         ),
         h(
           "div",
@@ -1525,5 +1544,6 @@ if (typeof module !== "undefined" && module && module.exports) {
     applyStoredOrder: applyStoredOrder,
     moveProviderId: moveProviderId,
     bannerAlertFromSummary: bannerAlertFromSummary,
+    releaseUpdate: releaseUpdate,
   };
 }
