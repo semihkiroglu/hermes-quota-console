@@ -84,7 +84,7 @@ Then restart the Hermes dashboard process. The `/quota-console` route and
   low/exhausted quota, a Hermes usage block (rate-limited/degraded), or an
   auth failure. It polls the same 30s-cached summary every 60s and links into
   this page. Transient "unavailable" fetch failures never raise the strip.
-- **Version**: the footer shows the plugin version (`v0.1.3`) read from
+- **Version**: the footer shows the plugin version (`v0.1.4`) read from
   `pyproject.toml`, matching the GitHub release tag.
 - **Settings**: alert thresholds are configured in two layers — global
   defaults first, then per-provider overrides. No alerts fire until a
