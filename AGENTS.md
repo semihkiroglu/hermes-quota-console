@@ -60,11 +60,15 @@ bundle + `plugin_api.py` FastAPI router).
 8. Code changes ship with tests and the gate. **No PR without a green gate.**
 9. Coordination identifiers (kanban task ids, etc.) stay internal; they never
    appear in user-facing code, comments, or UI text — user→actor language.
-10. The repo is public; `stable` and `unstable` both have branch protection
-    — **no direct pushes, PR required**. `unstable` (default) is the
-    contribution line: PRs merge there after review. `stable` is the
-    maintainer-only release line; changes reach it only via the maintainer's
-    promote (merge/push after a green gate).
+10. The repo is public; `stable` and `unstable` have branch protection.
+    `unstable` (default) is the contribution line: **PRs merge there after
+    review**. `stable` is the maintainer-only release line: changes reach
+    it via a **direct fast-forward push** from `unstable`
+    (`git push origin unstable:stable`) after a green gate — no merge
+    commits, so both branches stay on the identical tip and never drift
+    apart. Hard guards stay: `stable` rejects deletions and non-fast-forward
+    pushes, so rewriting history on either branch is impossible.
+
 11. **No drive-by refactors.** Files outside the task's scope are not changed;
     architectural changes are neither proposed nor made without an explicit
     user request.
