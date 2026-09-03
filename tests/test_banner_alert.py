@@ -182,3 +182,49 @@ def test_more_than_three_names_reports_extra():
     result = _banner(_summary(low=items))
     assert result["names"] == ["p0", "p1", "p2"]
     assert result["extra"] == 2
+
+
+def _release_update(current, latest):
+    """Run releaseUpdate(current, latest) under Node."""
+    payload = json.dumps([current, latest])
+    script = (
+        "const fs = require('fs');\n"
+        "const path = %r;\n"
+        "const code = fs.readFileSync(path, 'utf8');\n"
+        "const window = {\n"
+        "  __HERMES_PLUGIN_SDK__: null,\n"
+        "  __HERMES_PLUGINS__: { register: function () {} },\n"
+        "};\n"
+        "const fn = new Function('module', 'window', code);\n"
+        "const m = { exports: {} };\n"
+        "fn(m, window);\n"
+        "const result = m.exports.releaseUpdate.apply(null, %s);\n"
+        "process.stdout.write(JSON.stringify(result));\n" % (str(BUNDLE_PATH), payload)
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(
+            "node script failed: rc=%d stderr=%s" % (completed.returncode, completed.stderr)
+        )
+    return json.loads(completed.stdout)
+
+
+def test_release_update_returns_newer_tag():
+    assert _release_update("0.1.1", "v0.1.2") == "v0.1.2"
+    assert _release_update("v0.1.1", "v0.1.2") == "v0.1.2"
+
+
+def test_release_update_null_when_same_normalised():
+    assert _release_update("0.1.1", "v0.1.1") is None
+    assert _release_update("v0.1.1", "0.1.1") is None
+
+
+def test_release_update_null_when_missing():
+    assert _release_update(None, "v0.1.2") is None
+    assert _release_update("0.1.1", None) is None
+    assert _release_update(None, None) is None

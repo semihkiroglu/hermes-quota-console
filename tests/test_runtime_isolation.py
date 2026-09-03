@@ -200,6 +200,7 @@ def test_summary_endpoint_returns_safe_schema_without_hermes(monkeypatch):
     summary = api._cached_summary()
     assert set(summary) == {
         "version",
+        "latest_release",
         "updated_at",
         "profiles",
         "providers",
