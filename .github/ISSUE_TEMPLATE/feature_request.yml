@@ -1,0 +1,55 @@
+name: Provider / feature request
+description: Request a new provider adapter or a dashboard feature
+title: "[Request]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion! Before requesting a new provider adapter,
+        please check the provider matrix in
+        [README.md](https://github.com/semihkiroglu/hermes-quota-console#supported-providers)
+        and the adapter requirements in
+        [CONTRIBUTING.md](https://github.com/semihkiroglu/hermes-quota-console/blob/main/CONTRIBUTING.md)
+        (section 6.1): adapters only exist for providers with a **verified,
+        documented server-side quota/balance API**. Browser-session scraping
+        is not accepted, and balances are never invented.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Request type
+      options:
+        - New provider adapter
+        - Dashboard / UI feature
+        - Settings or alert behavior
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: provider-name
+    attributes:
+      label: Provider name (for adapter requests)
+      description: The provider's official name as shown in Hermes
+    validations:
+      required: false
+  - type: input
+    id: api-docs
+    attributes:
+      label: Official quota/balance API documentation
+      description: Link to the provider's documented API endpoint that exposes quota or balance data
+    validations:
+      required: false
+  - type: textarea
+    id: request
+    attributes:
+      label: What would you like?
+      description: Describe the feature or the data the adapter should show
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Why / use case
+      description: Optional background that helps shape the implementation
+    validations:
+      required: false

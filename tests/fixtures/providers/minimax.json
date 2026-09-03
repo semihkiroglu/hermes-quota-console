@@ -1,0 +1,41 @@
+{
+  "valid": {
+    "quota": {
+      "current_subscribe_title": "Token Plan · Plus",
+      "model_remains": [
+        {
+          "model_name": "general",
+          "current_interval_remaining_percent": 87.5,
+          "current_weekly_remaining_percent": 50,
+          "end_time": "2026-01-02T03:04:05Z",
+          "weekly_end_time": "2026-01-08T03:04:05Z"
+        }
+      ]
+    },
+    "balance": {
+      "base_resp": {"status_code": 0},
+      "credit_balance": "18.56"
+    }
+  },
+  "partial": {
+    "quota": {
+      "model_remains": [
+        {
+          "model_name": "general",
+          "current_interval_usage_count": 0,
+          "current_interval_total_count": 0
+        }
+      ]
+    },
+    "balance": {}
+  },
+  "malformed": {
+    "quota": {
+      "model_remains": {"not": "a list"}
+    },
+    "balance": {}
+  },
+  "unavailable": {
+    "_fixture_transport": "unavailable"
+  }
+}

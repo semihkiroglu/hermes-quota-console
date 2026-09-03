@@ -1,0 +1,14 @@
+{
+  "name": "quota-console",
+  "label": "Quota Console",
+  "description": "Profile-aware quota, balance, and model status for Hermes Agent.",
+  "icon": "BarChart3",
+  "version": "0.1.0",
+  "tab": {
+    "path": "/quota-console",
+    "position": "after:analytics"
+  },
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
+}

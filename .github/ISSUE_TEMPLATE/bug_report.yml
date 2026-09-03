@@ -1,0 +1,79 @@
+name: Bug report
+description: Report a problem with the Quota Console dashboard plugin
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+
+        > **Warning:** Do not paste tokens, API keys, connection strings with
+        > credentials, private config contents, or any other sensitive
+        > information. Redact everything that could identify or expose your
+        > environment. Security reports belong in [SECURITY.md](https://github.com/semihkiroglu/hermes-quota-console/blob/main/SECURITY.md).
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: Commit or tag of the plugin checkout you run, e.g. v0.1.0
+      placeholder: "v0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: hermes-version
+    attributes:
+      label: Hermes Agent version
+      description: Version of Hermes Agent the dashboard runs on
+      placeholder: "e.g. 0.x.y"
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Affected provider(s)
+      description: Provider cards involved, e.g. DeepSeek, MiniMax
+      placeholder: "DeepSeek"
+    validations:
+      required: false
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Steps to reproduce the problem
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the exact on-screen message or error text if any
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Plugin / dashboard log excerpt
+      description: Relevant log lines, with any sensitive values redacted
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: environment
+    attributes:
+      label: Check
+      options:
+        - label: The bug happens with the latest checkout on main
+        - label: No credential values are included in this report
+    validations:
+      required: false

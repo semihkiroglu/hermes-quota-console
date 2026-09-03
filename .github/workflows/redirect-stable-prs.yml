@@ -1,0 +1,35 @@
+name: Redirect PRs to unstable
+
+# Community contributions target unstable: opening a PR against stable
+# with a different base would leave it unmergeable (stable is
+# maintainer-only). This workflow closes such PRs and points the author
+# at unstable. The repository owner's own PRs (e.g. a promote PR) are
+# never touched.
+#
+# pull_request_target is required: closing a fork PR needs write
+# permissions, which the plain pull_request event never grants. No
+# checkout happens here and no PR-controlled content is read — the job
+# only acts on PR metadata, so this is safe by construction.
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+    branches: [stable]
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  redirect:
+    if: github.event.pull_request.user.login != 'semihkiroglu'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close and redirect PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr close "$PR_NUMBER" --repo "$REPO" --comment \
+            "Thanks for the contribution! This repository keeps **stable** maintainer-only — changes reach it only through the maintainer's promote step. Please open your pull request against the **unstable** branch instead (the repository default), where contributions are reviewed and merged."

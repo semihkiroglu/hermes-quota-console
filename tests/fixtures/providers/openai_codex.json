@@ -1,0 +1,38 @@
+{
+  "valid": {
+    "snapshot": {
+      "plan": "Codex Plus",
+      "windows": [
+        {
+          "label": "five-hour window",
+          "used_percent": 25,
+          "reset_at": "2026-01-02T03:04:05Z"
+        }
+      ],
+      "details": ["Credits balance: $3.50"]
+    }
+  },
+  "partial": {
+    "snapshot": {
+      "plan": "",
+      "windows": [
+        {
+          "label": "weekly window",
+          "used_percent": "unknown",
+          "reset_at": null
+        }
+      ],
+      "details": []
+    }
+  },
+  "malformed": {
+    "snapshot": {
+      "plan": "unexpected",
+      "windows": "not-a-list",
+      "details": {"not": "a list"}
+    }
+  },
+  "unavailable": {
+    "_fixture_transport": "unavailable"
+  }
+}

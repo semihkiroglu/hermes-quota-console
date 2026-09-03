@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# Local Hermes state and credentials
+**/.env
+**/.env.*
+**/auth.json
+**/config.yaml
+**/codex_usage_state.json
+**/sessions/
+**/logs/
+
+# Local tooling
+.venv/
+venv/
+.worktrees/
+node_modules/
+.DS_Store
+Thumbs.db

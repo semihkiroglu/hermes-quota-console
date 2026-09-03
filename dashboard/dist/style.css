@@ -1,0 +1,919 @@
+.usages-page {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.usages-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.usages-title {
+  margin: 0;
+  color: var(--color-foreground);
+  font-size: 1.5rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.usages-subtitle,
+.usages-reset,
+.usages-empty,
+.usages-notice,
+.usages-footnote {
+  color: var(--color-muted-foreground);
+}
+
+.usages-subtitle {
+  margin: 6px 0 0;
+  font-size: 0.9rem;
+}
+
+.usages-refresh {
+  flex: 0 0 auto;
+}
+
+.usages-error {
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-destructive);
+  border-radius: var(--radius-md);
+  color: var(--color-destructive);
+  font-size: 0.88rem;
+}
+
+.usages-alert {
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  font-size: 0.88rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.usages-alert--action {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid var(--color-destructive);
+  color: var(--color-destructive);
+}
+
+/* Alarm layer: yellow state for primary sources at the "low" level.
+   Sits between the green/red destructive scale so the operator reads it as
+   "self-healing soon, pay attention" instead of the same red as auth/rate
+   limit failures. Reuses the same alert layout as the red variant — the
+   only thing that changes is colour and tone. The text stays near-white
+   so it remains readable on the tinted background in both themes. */
+.usages-alert--low {
+  background: rgba(234, 179, 8, 0.16);
+  border: 1px solid rgba(234, 179, 8, 0.55);
+  color: rgb(253, 230, 138);
+}
+
+.usages-alert--exhausted {
+  background: rgba(239, 68, 68, 0.16);
+  border: 1px solid var(--color-destructive);
+  color: var(--color-destructive);
+}
+
+.usages-alert-icon {
+  font-size: 1rem;
+}
+
+.usages-alert-text {
+  font-weight: 500;
+}
+
+.usages-plan {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-muted-foreground);
+  font-size: 0.78rem;
+}
+
+.usages-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: var(--color-muted-foreground);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.usages-status::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--color-muted-foreground);
+  content: "";
+}
+
+.usages-status[data-status="ok"]::before {
+  background: var(--color-success);
+}
+
+.usages-status[data-status="unavailable"]::before {
+  background: var(--color-destructive);
+}
+
+.usages-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.usages-section--balances {
+  gap: 10px;
+}
+
+.usages-balance {
+  padding: 8px 12px;
+  background: var(--color-muted);
+  border-radius: var(--radius-md);
+}
+
+.usages-balance-value {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--color-foreground);
+}
+
+.usages-window,
+.usages-balance {
+  min-width: 0;
+}
+
+.usages-window-top,
+.usages-balance {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.usages-window-label,
+.usages-window-value {
+  color: var(--color-foreground);
+  font-size: 0.85rem;
+}
+
+.usages-window-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.usages-window--muted .usages-window-value {
+  color: var(--color-muted-foreground);
+  font-weight: 500;
+}
+
+/* Alarm layer: tint window/balance rows by their derived level.
+   The bar fill itself stays primary-coloured — only the value text and
+   the row's left edge change so the existing progress bar does not
+   regress. Unknown level keeps the default styling but gets a subtle
+   neutral marker so the operator notices an unparseable source. */
+.usages-window.usages-level--low .usages-window-value,
+.usages-balance.usages-level--low .usages-balance-value {
+  color: rgb(161, 98, 7);
+  font-weight: 600;
+}
+
+.usages-window.usages-level--exhausted,
+.usages-balance.usages-level--exhausted {
+  border-left: 3px solid var(--color-destructive);
+  padding-left: 9px;
+}
+
+.usages-window.usages-level--exhausted .usages-window-value,
+.usages-balance.usages-level--exhausted .usages-balance-value {
+  color: var(--color-destructive);
+  font-weight: 600;
+}
+
+.usages-window.usages-level--unknown,
+.usages-balance.usages-level--unknown {
+  border-left: 3px dashed var(--color-muted-foreground);
+  padding-left: 9px;
+}
+
+.usages-progress {
+  width: 100%;
+  height: 7px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-muted);
+}
+
+.usages-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-primary);
+  transition: width 180ms ease;
+}
+
+.usages-reset {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.74rem;
+}
+
+.usages-notice {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.usages-footnote {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 24px 0 0;
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.usages-footnote-brand {
+  color: var(--color-foreground);
+  font-size: 0.8rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  transition: opacity 120ms ease;
+}
+
+.usages-footnote-brand:hover {
+  opacity: 0.75;
+}
+
+.usages-footnote-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.usages-footnote-author {
+  color: var(--color-muted-foreground);
+}
+
+.usages-footnote-link {
+  color: var(--color-muted-foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--color-muted);
+  transition: color 120ms ease, text-decoration-color 120ms ease;
+}
+
+.usages-footnote-link:hover {
+  color: var(--color-foreground);
+  text-decoration-color: var(--color-foreground);
+}
+
+/* Sponsor renders as a pill button on its own line at the bottom,
+   mirroring GitHub's sponsor pink so it reads as the funding action. */
+.usages-footnote-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(191, 57, 137, 0.45);
+  background: rgba(191, 57, 137, 0.12);
+  color: rgb(240, 120, 190);
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.usages-footnote-btn:hover {
+  background: rgba(191, 57, 137, 0.22);
+  border-color: rgba(191, 57, 137, 0.8);
+  color: rgb(255, 190, 225);
+}
+
+.usages-empty {
+  padding: 32px 0;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+/* First-paint loading state: while the initial summary request is in
+   flight the page shows a centered spinner + label instead of an empty
+   skeleton. Only the first load matches (data == null); manual refreshes
+   keep the previous content on screen. */
+.usages-page--loading {
+  min-height: 55vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.usages-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-muted-foreground);
+  font-size: 0.95rem;
+}
+
+.usages-loading-spinner {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border: 2px solid var(--color-border, rgba(128, 128, 128, 0.3));
+  border-top-color: var(--color-foreground);
+  border-radius: 50%;
+  animation: usages-spin 0.8s linear infinite;
+}
+
+@keyframes usages-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.usages-toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.usages-provider-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.usages-provider-bucket {
+  border: 1px solid var(--color-border, var(--color-muted));
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  background: var(--color-card, transparent);
+  transition: opacity 150ms ease;
+}
+
+/* Hidden provider cards render as a compact single-row strip while
+   customize mode is on (name + Show button only); they are removed from
+   layout entirely when it is off. */
+.usages-provider-bucket--hidden-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 14px;
+  opacity: 0.75;
+  border-style: dashed;
+  background: transparent;
+}
+
+.usages-provider-bucket--hidden-row .usages-provider-bucket-title,
+.usages-provider-bucket--hidden-row .usages-provider-bucket-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.usages-provider-bucket--hidden-row .usages-provider-bucket-heading {
+  font-weight: 500;
+}
+
+/* The card being dragged gets a translucent look so the operator can see
+   where it will land while customize mode is active. */
+.usages-provider-bucket--dragging {
+  opacity: 0.35;
+  outline: 1px dashed var(--color-border, var(--color-muted));
+}
+
+/* Drop indicators: a solid accent line on the edge where the dragged
+   card would land (before = top edge, after = bottom edge). */
+.usages-provider-bucket--drop-before {
+  box-shadow: 0 -3px 0 0 var(--color-foreground, #333);
+}
+
+.usages-provider-bucket--drop-after {
+  box-shadow: 0 3px 0 0 var(--color-foreground, #333);
+}
+
+/* Customize mode (toolbar toggle): the drag handle sits next to the card
+   title and is the only grab target, so normal clicks on the card body
+   keep working while a drag is in progress. */
+.usages-provider-bucket-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.usages-provider-bucket-title .usages-provider-bucket-heading {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usages-provider-bucket-drag {
+  cursor: grab;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: var(--color-foreground);
+  background: var(--color-muted);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  letter-spacing: -1px;
+  user-select: none;
+  padding: 0;
+  opacity: 0.85;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+
+.usages-provider-bucket-drag:hover {
+  opacity: 1;
+  background: var(--color-border, var(--color-muted));
+}
+
+.usages-provider-bucket-drag:active {
+  cursor: grabbing;
+}
+
+.usages-provider-bucket-header,
+.usages-provider-bucket-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.usages-provider-bucket-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.usages-provider-bucket-heading {
+  margin: 0;
+  color: var(--color-foreground);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.usages-provider-bucket-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-muted);
+}
+
+.usages-provider-bucket-meta {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.usages-provider-bucket-meta .usages-plan {
+  display: inline-flex;
+  margin-top: 0;
+}
+
+.usages-provider-profile-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.usages-provider-profile {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto minmax(160px, 1.4fr) minmax(110px, auto) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-top: 1px solid var(--color-muted);
+  font-size: 0.82rem;
+}
+
+.usages-provider-profile:first-child {
+  border-top: 0;
+}
+
+.usages-provider-profile--provider .usages-provider-profile-name {
+  font-size: 0.92rem;
+}
+
+.usages-provider-profile-name {
+  color: var(--color-foreground);
+  font-weight: 600;
+}
+
+.usages-provider-profile-model {
+  color: var(--color-muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.usages-provider-profile-action-wrap {
+  display: inline-flex;
+  justify-self: end;
+}
+
+/* Provider and profile rows share one action column; the button hugs the
+   right edge on every row. */
+.usages-provider-profile-action {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .usages-provider-profile {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .usages-provider-profile-action-wrap {
+    justify-self: start;
+  }
+
+  .usages-provider-profile-action {
+    justify-self: start;
+  }
+}
+
+.usages-block {
+  margin-top: 24px;
+}
+
+.usages-block:first-of-type {
+  margin-top: 0;
+}
+
+.usages-block-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.usages-block-title {
+  margin: 0;
+  color: var(--color-foreground);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+/* Small pill next to the section title: shows how many provider cards are
+   currently hidden while customize mode is off. */
+.usages-hidden-badge {
+  flex: 0 0 auto;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--color-muted, transparent);
+  border: 1px solid var(--color-border, var(--color-muted));
+  color: var(--color-muted-foreground);
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.usages-model-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: var(--color-muted-foreground);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.usages-model-status::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--color-muted-foreground);
+  content: "";
+}
+
+.usages-model-status[data-status="ready"]::before {
+  background: var(--color-success);
+}
+
+.usages-model-status[data-status="rate-limited"]::before,
+.usages-model-status[data-status="degraded"]::before {
+  background: var(--color-warning);
+}
+
+.usages-model-status[data-status="auth-failed"]::before {
+  background: var(--color-destructive);
+}
+
+.usages-action-message {
+  margin: 0 0 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-muted);
+  border-radius: var(--radius-md);
+  color: var(--color-foreground);
+  font-size: 0.82rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.usages-action-message-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.usages-action-message-close {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 1.05rem;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.usages-action-message-close:hover {
+  opacity: 1;
+  background: var(--color-muted);
+}
+
+.usages-action-message--success {
+  border-color: var(--color-success);
+}
+
+.usages-action-message--error {
+  border-color: var(--color-destructive);
+  color: var(--color-destructive);
+}
+
+.usages-provider-note {
+  margin: 8px 0 12px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--color-muted);
+  border-radius: var(--radius-sm);
+  background: var(--color-muted, transparent);
+  color: var(--color-muted-foreground);
+  font-size: 0.82rem;
+  font-style: italic;
+}
+
+.usages-settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 32px 16px;
+  z-index: 1000;
+  overflow-y: auto;
+}
+
+.usages-settings-dialog {
+  width: 100%;
+  max-width: 760px;
+  background: var(--color-card, var(--color-background));
+  color: var(--color-foreground);
+  border: 1px solid var(--color-border, var(--color-muted));
+  border-radius: var(--radius-lg, var(--radius-md));
+  padding: 20px 22px 18px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25);
+  box-sizing: border-box;
+}
+
+.usages-settings-header {
+  margin-bottom: 16px;
+}
+
+.usages-settings-title {
+  margin: 0 0 6px;
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+
+.usages-settings-description {
+  margin: 0;
+  color: var(--color-muted-foreground);
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.usages-settings-section {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-muted);
+}
+
+.usages-settings-section:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.usages-settings-section-title {
+  margin: 0 0 10px;
+  font-size: 0.86rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+}
+
+.usages-settings-field {
+  display: grid;
+  grid-template-columns: 1.4fr 1.1fr 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--color-muted);
+}
+
+.usages-settings-field:last-child {
+  border-bottom: 0;
+}
+
+.usages-settings-field-label label {
+  display: block;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.usages-settings-field-hint {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  color: var(--color-muted-foreground);
+  line-height: 1.35;
+}
+
+.usages-settings-field-input {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
+.usages-settings-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--color-muted-foreground);
+}
+
+.usages-settings-field-input input[type="number"],
+.usages-settings-field-input input[type="text"] {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-muted);
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-size: 0.88rem;
+  box-sizing: border-box;
+}
+
+.usages-settings-field-input input:disabled {
+  opacity: 0.55;
+}
+
+.usages-settings-field-current {
+  font-size: 0.78rem;
+  color: var(--color-muted-foreground);
+  line-height: 1.3;
+}
+
+.usages-settings-provider {
+  margin-bottom: 10px;
+  border: 1px solid var(--color-muted);
+  border-radius: var(--radius-md);
+  padding: 0 10px;
+  background: var(--color-background);
+}
+
+.usages-settings-provider[open] {
+  padding-bottom: 4px;
+}
+
+/* Auto-hidden providers (configured in Hermes but no quota data) render
+   dimmed at the bottom of the settings list; opening them to edit an
+   override brings them back to full opacity. */
+.usages-settings-provider--dimmed {
+  opacity: 0.45;
+  filter: grayscale(0.8);
+}
+
+.usages-settings-provider--dimmed[open] {
+  opacity: 1;
+  filter: none;
+}
+
+.usages-settings-provider-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  cursor: pointer;
+  font-size: 0.92rem;
+  list-style: none;
+}
+
+.usages-settings-provider-summary::-webkit-details-marker {
+  display: none;
+}
+
+.usages-settings-provider-name {
+  font-weight: 600;
+}
+
+.usages-settings-provider-tag {
+  font-size: 0.74rem;
+  color: var(--color-muted-foreground);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-muted);
+}
+
+.usages-settings-provider-tag--empty {
+  opacity: 0.7;
+}
+
+.usages-settings-empty {
+  margin: 8px 0;
+  color: var(--color-muted-foreground);
+  font-size: 0.85rem;
+}
+
+.usages-settings-error {
+  margin: 12px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-destructive);
+  color: var(--color-destructive);
+  font-size: 0.85rem;
+}
+
+.usages-settings-footer {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-muted);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .usages-settings-overlay {
+    padding: 0;
+  }
+  .usages-settings-dialog {
+    max-width: none;
+    border-radius: 0;
+    min-height: 100vh;
+  }
+  .usages-settings-field {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .usages-page {
+    padding: 16px;
+  }
+
+  .usages-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .usages-refresh {
+    align-self: flex-start;
+  }
+}
