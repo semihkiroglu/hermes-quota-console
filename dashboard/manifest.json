@@ -10,5 +10,6 @@
   },
   "entry": "dist/index.js",
   "css": "dist/style.css",
-  "api": "plugin_api.py"
+  "api": "plugin_api.py",
+  "slots": ["header-banner"]
 }

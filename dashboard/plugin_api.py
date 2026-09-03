@@ -85,6 +85,32 @@ _CACHE: Optional[dict[str, Any]] = None
 _CACHE_AT = 0.0
 
 
+def _plugin_version() -> Optional[str]:
+    """Return the plugin version from pyproject.toml, or ``None``.
+
+    The version is read from the project file next to the dashboard
+    directory so the footer can show the same version the release
+    workflow tags. A missing or malformed file fails closed to ``None``
+    (the UI simply hides the version chip); the file is tiny and read
+    on every summary build, so no caching is needed.
+    """
+    try:
+        pyproject = _DASHBOARD_DIR.parent / "pyproject.toml"
+        text = pyproject.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("version"):
+            # TOML string literal: version = "1.2.3"
+            marker = stripped.split("=", 1)
+            if len(marker) == 2:
+                raw = marker[1].strip().strip('"').strip("'")
+                if raw:
+                    return raw
+    return None
+
+
 class UsageProviderError(RuntimeError):
     """Expected provider/auth/response failure without sensitive details."""
 
@@ -814,6 +840,7 @@ def _build_summary() -> dict[str, Any]:
     )
     alerts = _bucket_alerts(overview)
     return {
+        "version": _plugin_version(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "profiles": profile_cards,
         "providers": provider_cards,

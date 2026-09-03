@@ -199,6 +199,7 @@ def test_summary_endpoint_returns_safe_schema_without_hermes(monkeypatch):
     monkeypatch.setattr(api, "_CACHE_AT", 0.0)
     summary = api._cached_summary()
     assert set(summary) == {
+        "version",
         "updated_at",
         "profiles",
         "providers",
