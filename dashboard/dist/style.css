@@ -974,12 +974,12 @@
   color: rgb(253, 230, 138);
 }
 
-.usages-banner--exhausted {
+.usages-banner--critical {
   background: rgba(239, 68, 68, 0.16);
   border-bottom: 1px solid var(--color-destructive);
 }
 
-.usages-banner--exhausted .usages-banner-icon {
+.usages-banner--critical .usages-banner-icon {
   color: var(--color-destructive);
 }
 

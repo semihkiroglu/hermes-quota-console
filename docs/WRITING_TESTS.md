@@ -164,8 +164,8 @@ fixture contains real credentials, use non-pattern dummy values.
 | New provider adapter | `tests/test_<id>.py` (new) | fake context |
 | `providers/registry.py` | `test_registry.py`, `test_dynamic_registry.py` | monkeypatch |
 | `settings.py` | `test_settings_storage.py` | isolated module + tmp_path |
-| `plugin_api.py` endpoints | `test_settings_endpoints.py`, `test_provider_overview.py` | `plugin_api` fixture |
-| `dist/index.js` logic | `test_bucket_partition.py` (+ new) | Node + module export |
+| `plugin_api.py` endpoints | `test_settings_endpoints.py`, `test_provider_overview.py`, `test_plugin_version.py` | `plugin_api` fixture |
+| `dist/index.js` logic | `test_bucket_partition.py`, `test_banner_alert.py` | Node + module export |
 | Secret/reset behavior | `test_secret_safety.py`, `test_reset_preservation.py` | scan + isolated module |
 
 ## 7. What a good test looks like
