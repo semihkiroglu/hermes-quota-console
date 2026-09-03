@@ -253,6 +253,22 @@
   transition: opacity 120ms ease;
 }
 
+.usages-footnote-brand-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.usages-footnote-version {
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-muted);
+  color: var(--color-muted-foreground);
+  line-height: 1.5;
+}
+
 .usages-footnote-brand:hover {
   opacity: 0.75;
 }
@@ -916,4 +932,66 @@
   .usages-refresh {
     align-self: flex-start;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Global shell banner (header-banner slot)                            */
+/* ------------------------------------------------------------------ */
+/* Rendered below the top nav on every dashboard page, next to the     */
+/* shell's own system banners. Uses theme variables and the same       */
+/* low/exhausted tone as the in-page alerts so a strip and its card    */
+/* read as one alert family. The whole strip is a link into the        */
+/* plugin tab; keep it slim so it never pushes page content around.    */
+.usages-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 16px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-decoration: none;
+  color: var(--color-foreground);
+  transition: filter 120ms ease;
+}
+
+.usages-banner:hover {
+  filter: brightness(1.12);
+}
+
+.usages-banner-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.usages-banner--low {
+  background: rgba(234, 179, 8, 0.16);
+  border-bottom: 1px solid rgba(234, 179, 8, 0.45);
+}
+
+.usages-banner--low .usages-banner-icon {
+  color: rgb(253, 230, 138);
+}
+
+.usages-banner--exhausted {
+  background: rgba(239, 68, 68, 0.16);
+  border-bottom: 1px solid var(--color-destructive);
+}
+
+.usages-banner--exhausted .usages-banner-icon {
+  color: var(--color-destructive);
+}
+
+.usages-banner-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.usages-banner-cta {
+  flex: 0 0 auto;
+  color: var(--color-muted-foreground);
+  font-size: 0.78rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }

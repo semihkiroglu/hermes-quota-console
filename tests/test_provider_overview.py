@@ -64,6 +64,7 @@ def test_summary_includes_provider_overview(isolated_plugin_api, monkeypatch):
     # carries the aggregated low/exhausted inputs for the yellow/red alerts.
     assert all("alert" in bucket for bucket in summary["provider_overview"])
     assert set(summary) == {
+        "version",
         "updated_at",
         "profiles",
         "providers",

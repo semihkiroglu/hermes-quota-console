@@ -105,6 +105,32 @@ function moveProviderId(ids, fromId, toId, edge) {
   return list;
 }
 
+// Summarise a /summary payload into the shell banner state (module scope
+// so Node fixtures can exercise the aggregation without a React SDK).
+// Returns null when nothing needs attention (the banner stays hidden),
+// otherwise { level: "exhausted" | "low", count, names[], extra } where
+// ``names`` holds the first provider labels and ``extra`` the remaining
+// count beyond three. Exhausted wins over low: one strip, red first.
+function bannerAlertFromSummary(summary) {
+  if (!summary || typeof summary !== "object") return null;
+  const alerts = (summary.alerts && typeof summary.alerts === "object") ? summary.alerts : {};
+  const exhausted = Array.isArray(alerts.exhausted) ? alerts.exhausted : [];
+  const low = Array.isArray(alerts.low) ? alerts.low : [];
+  function describe(items, level) {
+    if (!items.length) return null;
+    const names = items.slice(0, 3).map(function (entry) {
+      return entry && typeof entry.provider === "string" ? entry.provider : "unknown";
+    });
+    return {
+      level: level,
+      count: items.length,
+      names: names,
+      extra: items.length > 3 ? items.length - 3 : 0,
+    };
+  }
+  return describe(exhausted, "exhausted") || describe(low, "low") || null;
+}
+
 (function () {
   "use strict";
 
@@ -1345,9 +1371,16 @@ function moveProviderId(ids, fromId, toId, edge) {
         "div",
         { className: "usages-footnote" },
         h(
-          "a",
-          { className: "usages-footnote-brand", href: "https://github.com/semihkiroglu/hermes-quota-console", target: "_blank", rel: "noopener noreferrer" },
-          "Hermes Quota Console",
+          "span",
+          { className: "usages-footnote-brand-line" },
+          h(
+            "a",
+            { className: "usages-footnote-brand", href: "https://github.com/semihkiroglu/hermes-quota-console", target: "_blank", rel: "noopener noreferrer" },
+            "Hermes Quota Console",
+          ),
+          data.version
+            ? h("span", { className: "usages-footnote-version" }, "v" + data.version)
+            : null,
         ),
         h(
           "div",
@@ -1379,6 +1412,68 @@ function moveProviderId(ids, fromId, toId, edge) {
   }
 
   window.__HERMES_PLUGINS__.register("quota-console", UsagePage);
+
+  // -------------------------------------------------------------------
+  // Global shell banner (header-banner slot)
+  // -------------------------------------------------------------------
+  //
+  // The dashboard shell renders a full-width strip below the top nav on
+  // every page (App.tsx renders <PluginSlot name="header-banner" /> next
+  // to its own system banners). When the summary reports quota alerts we
+  // register a slim, clickable strip in that slot so the operator sees
+  // \"provider out of quota\" before opening the plugin tab; clicking it
+  // navigates to the plugin page. The banner polls the same 30s-cached
+  // summary endpoint on its own 60s interval (the tab page owns its own
+  // interval and unmounts when hidden, so a shared timer is not possible).
+  // bannerAlertFromSummary lives at module scope so the Node test suite
+  // can exercise the same aggregation the browser renders with.
+  function QuotaAlertBanner() {
+    const [alert, setAlert] = useState(null);
+    const mounted = useRef(true);
+
+    useEffect(function () {
+      return function () { mounted.current = false; };
+    }, []);
+
+    function refresh() {
+      SDK.fetchJSON(API)
+        .then(function (data) {
+          if (!mounted.current) return;
+          setAlert(bannerAlertFromSummary(data));
+        })
+        .catch(function () {
+          // Keep the last known alert (or nothing) on transient failures;
+          // the banner must never block the dashboard or log details.
+        });
+    }
+
+    useEffect(function () {
+      refresh();
+      const timer = window.setInterval(refresh, 60 * 1000);
+      return function () { window.clearInterval(timer); };
+    }, []);
+
+    if (!alert) return null;
+    const names = alert.names.join(", ") + (alert.extra ? " +" + alert.extra + " more" : "");
+    const copy = alert.level === "exhausted"
+      ? alert.count + " provider(s) out of quota (" + names + ")"
+      : alert.count + " provider(s) running low (" + names + ")";
+    return h(
+      "a",
+      {
+        className: "usages-banner usages-banner--" + alert.level,
+        href: "/quota-console",
+        role: alert.level === "exhausted" ? "alert" : "status",
+      },
+      h("span", { className: "usages-banner-icon" }, "\u26A0"),
+      h("span", { className: "usages-banner-text" }, copy),
+      h("span", { className: "usages-banner-cta" }, "Open Quota Console \u2192"),
+    );
+  }
+
+  if (window.__HERMES_PLUGINS__.registerSlot) {
+    window.__HERMES_PLUGINS__.registerSlot("quota-console", "header-banner", QuotaAlertBanner);
+  }
 })();
 
 // When loaded under Node (test fixtures only), expose projectProfiles so
@@ -1392,5 +1487,6 @@ if (typeof module !== "undefined" && module && module.exports) {
     partitionBuckets: partitionBuckets,
     applyStoredOrder: applyStoredOrder,
     moveProviderId: moveProviderId,
+    bannerAlertFromSummary: bannerAlertFromSummary,
   };
 }
