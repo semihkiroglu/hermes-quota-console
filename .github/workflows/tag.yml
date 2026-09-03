@@ -5,14 +5,15 @@ name: Tag and release
 # the maintainer bumps the version in pyproject.toml (patch for fixes,
 # minor for features, major for breaking changes) when promoting to
 # stable, and this workflow tags that exact version and publishes the
-# release with auto-generated notes. Idempotent: if the tag already
-# exists (manual tag or earlier merge) the run skips instead of failing
-# or moving the tag.
+# release with auto-generated notes. Idempotent: if the tag/release
+# already exists (manual tag or earlier merge) the run skips instead of
+# failing or moving the tag. Runs on every stable push (no path filter)
+# so the first release is picked up even when pyproject.toml arrives in
+# the same push as this workflow file.
 
 on:
   push:
     branches: [stable]
-    paths: [pyproject.toml]
 
 permissions:
   contents: write
