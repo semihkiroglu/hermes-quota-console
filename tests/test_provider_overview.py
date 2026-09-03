@@ -65,6 +65,7 @@ def test_summary_includes_provider_overview(isolated_plugin_api, monkeypatch):
     assert all("alert" in bucket for bucket in summary["provider_overview"])
     assert set(summary) == {
         "version",
+        "latest_release",
         "updated_at",
         "profiles",
         "providers",
