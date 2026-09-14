@@ -31,7 +31,9 @@ The on-disk shape is three top-level blocks::
       "notifications": {             # browser-side notification opt-in
         "enabled": false,            # off by default — opt-in
         "levels": ["critical"],      # which alert levels fire a notification
-        "cooldown_minutes": 60       # per-alert dedupe window
+        "reminder_enabled": false,   # master switch for repeat reminders
+        "reminder_minutes": 60       # repeat cadence; only meaningful while
+                                     # reminder_enabled is on
       }
     }
 
@@ -97,15 +99,23 @@ _NOTIFICATION_LEVELS: frozenset[str] = frozenset({"critical", "low"})
 # is the canonical level order.
 _NOTIFICATION_LEVELS_ORDER: tuple[str, ...] = ("critical", "low")
 _NOTIFICATION_LEVELS_DEFAULT: tuple[str, ...] = ("critical",)
-_NOTIFICATION_COOLDOWN_MIN: int = 0
-_NOTIFICATION_COOLDOWN_MAX: int = 24 * 60  # 24h cap keeps the input sane
-_NOTIFICATION_COOLDOWN_DEFAULT: int = 60
+# Repeat-reminder window. ``reminder_minutes`` is the gap between
+# repeat notifications on the same still-active alert; ``reminder_enabled``
+# is the master switch (default OFF — operators opt into repeats
+# explicitly). The min/max bracket keeps the dialog input sane while
+# leaving 5..1440 as the operator-controllable range requested by the
+# spec.
+_NOTIFICATION_REMINDER_MIN: int = 5
+_NOTIFICATION_REMINDER_MAX: int = 24 * 60  # 24h cap keeps the input sane
+_NOTIFICATION_REMINDER_DEFAULT: int = 60
 _NOTIFICATIONS_ENABLED_DEFAULT: bool = False
+_NOTIFICATIONS_REMINDER_ENABLED_DEFAULT: bool = False
 
 _BUILTIN_NOTIFICATIONS: dict[str, Any] = {
     "enabled": _NOTIFICATIONS_ENABLED_DEFAULT,
     "levels": list(_NOTIFICATION_LEVELS_DEFAULT),
-    "cooldown_minutes": _NOTIFICATION_COOLDOWN_DEFAULT,
+    "reminder_enabled": _NOTIFICATIONS_REMINDER_ENABLED_DEFAULT,
+    "reminder_minutes": _NOTIFICATION_REMINDER_DEFAULT,
 }
 
 _WRITE_LOCK = threading.Lock()
@@ -244,8 +254,11 @@ def _normalize_notifications(value: Any) -> dict[str, Any]:
     Each field defaults to its built-in value when missing — operators
     only state the fields they want to change. ``levels`` is normalised
     through a set so duplicates collapse and ordering is irrelevant;
-    ``cooldown_minutes`` is clamped into a sane range so the dialog never
+    ``reminder_minutes`` is clamped into a sane range so the dialog never
     accidentally disables notifications forever or spams the operator.
+    The repeat-reminder switch (``reminder_enabled``) defaults to ``False``
+    so a brand-new alert notifies exactly once and never repeats unless
+    the operator opts in.
     """
     cleaned: dict[str, Any] = {}
     if value is None:
@@ -254,7 +267,7 @@ def _normalize_notifications(value: Any) -> dict[str, Any]:
         raise SettingsValidationError(
             "notifications must be an object", field="notifications"
         )
-    allowed = {"enabled", "levels", "cooldown_minutes"}
+    allowed = {"enabled", "levels", "reminder_enabled", "reminder_minutes"}
     extras = set(value) - allowed
     if extras:
         raise SettingsValidationError(
@@ -294,24 +307,36 @@ def _normalize_notifications(value: Any) -> dict[str, Any]:
                 field="notifications.levels",
             )
         cleaned["levels"] = ordered
-    # cooldown_minutes: int >= 0 capped at 24h.
-    if "cooldown_minutes" in value:
-        raw = value["cooldown_minutes"]
+    # reminder_enabled: bool master switch for repeat reminders. Default
+    # OFF — repeat notifications are strictly opt-in.
+    if "reminder_enabled" in value:
+        raw = value["reminder_enabled"]
+        if not isinstance(raw, bool):
+            raise SettingsValidationError(
+                "notifications.reminder_enabled must be a boolean",
+                field="notifications.reminder_enabled",
+            )
+        cleaned["reminder_enabled"] = raw
+    # reminder_minutes: int in 5..1440. Only meaningful while
+    # reminder_enabled is on, but the value is always validated so the
+    # on-disk payload stays well-formed regardless of the master switch.
+    if "reminder_minutes" in value:
+        raw = value["reminder_minutes"]
         # bool is a subclass of int; reject it explicitly so True/False
         # never slip through as 1/0.
         if isinstance(raw, bool) or not isinstance(raw, int):
             raise SettingsValidationError(
-                "notifications.cooldown_minutes must be an integer in "
-                f"{_NOTIFICATION_COOLDOWN_MIN}..{_NOTIFICATION_COOLDOWN_MAX}",
-                field="notifications.cooldown_minutes",
+                "notifications.reminder_minutes must be an integer in "
+                f"{_NOTIFICATION_REMINDER_MIN}..{_NOTIFICATION_REMINDER_MAX}",
+                field="notifications.reminder_minutes",
             )
-        if raw < _NOTIFICATION_COOLDOWN_MIN or raw > _NOTIFICATION_COOLDOWN_MAX:
+        if raw < _NOTIFICATION_REMINDER_MIN or raw > _NOTIFICATION_REMINDER_MAX:
             raise SettingsValidationError(
-                "notifications.cooldown_minutes must be in "
-                f"{_NOTIFICATION_COOLDOWN_MIN}..{_NOTIFICATION_COOLDOWN_MAX}",
-                field="notifications.cooldown_minutes",
+                "notifications.reminder_minutes must be in "
+                f"{_NOTIFICATION_REMINDER_MIN}..{_NOTIFICATION_REMINDER_MAX}",
+                field="notifications.reminder_minutes",
             )
-        cleaned["cooldown_minutes"] = raw
+        cleaned["reminder_minutes"] = raw
     # Merge over the defaults so any field the operator omitted keeps its
     # built-in value. Done last so partial payloads round-trip cleanly.
     merged = dict(_BUILTIN_NOTIFICATIONS)
@@ -530,7 +555,8 @@ def builtin_notifications() -> dict[str, Any]:
     return {
         "enabled": _BUILTIN_NOTIFICATIONS["enabled"],
         "levels": list(_BUILTIN_NOTIFICATIONS["levels"]),
-        "cooldown_minutes": _BUILTIN_NOTIFICATIONS["cooldown_minutes"],
+        "reminder_enabled": _BUILTIN_NOTIFICATIONS["reminder_enabled"],
+        "reminder_minutes": _BUILTIN_NOTIFICATIONS["reminder_minutes"],
     }
 
 
@@ -542,6 +568,17 @@ def known_fields() -> tuple[str, ...]:
 def notification_levels() -> tuple[str, ...]:
     """Return the allowed notification alert levels, in canonical order."""
     return _NOTIFICATION_LEVELS_ORDER
+
+
+def notification_reminder_minutes() -> tuple[int, int]:
+    """Return the operator-controllable ``reminder_minutes`` range.
+
+    The UI uses this range so the dialog input mirrors the validator
+    without hardcoding constants in two places. The closed interval
+    ``[5, 1440]`` (5 minutes .. 24 hours) is the spec range; anything
+    outside it fails closed at the validator.
+    """
+    return (_NOTIFICATION_REMINDER_MIN, _NOTIFICATION_REMINDER_MAX)
 
 
 def note_max_length() -> int:

@@ -230,7 +230,13 @@ const NOTIFICATION_LEVELS = ["critical", "low"];
 const NOTIFICATION_DEFAULTS = Object.freeze({
   enabled: false,
   levels: ["critical"],
-  cooldown_minutes: 60,
+  // Repeat-reminder master switch. Default OFF — a new alert notifies
+  // once and never repeats while it stays active. Operators opt into
+  // repeat reminders explicitly.
+  reminder_enabled: false,
+  // Gap between repeat notifications on the same still-active alert.
+  // Only meaningful while reminder_enabled is on.
+  reminder_minutes: 60,
 });
 
 // Stable identity for one (level, provider) alert. The frontend uses it
@@ -291,11 +297,16 @@ function notificationAlertIdentity(summary) {
 //     triggers a fire. Equal sets or downgrades (critical → low) never
 //     fire again on the same identity, so the same outage does not
 //     spam the operator.
+//   * Repeat reminders are gated by ``notifications.reminder_enabled``.
+//     When OFF (default) an alert fires exactly once; the cooldown map
+//     is still seeded for the active identity but never consulted again
+//     until the alert leaves the snapshot. When ON, a still-active
+//     alert fires again after ``reminder_minutes`` have elapsed since
+//     the previous fire.
 //   * ``now`` (epoch ms) and ``cooldownMap`` (identityKey -> lastFiredAt)
-//     implement the per-alert cooldown: when the same identity fires
-//     twice within ``cooldown_minutes`` minutes, the second one is
-//     suppressed. The cooldown is updated for every fired identity so a
-//     refreshing alert keeps respecting the window until it clears.
+//     implement the per-alert reminder window. The cooldown is updated
+//     for every fired identity so a refreshing alert keeps respecting
+//     the window until it clears.
 function notificationDecisions(
   summary,
   previousIdentity,
@@ -310,10 +321,14 @@ function notificationDecisions(
         return NOTIFICATION_LEVELS.indexOf(level) !== -1;
       })
     : defaults.levels.slice();
-  const cooldownMinutes = (typeof settings.cooldown_minutes === "number" && settings.cooldown_minutes >= 0)
-    ? settings.cooldown_minutes
-    : defaults.cooldown_minutes;
-  const cooldownMs = cooldownMinutes * 60 * 1000;
+  // Repeat-reminder knobs. ``reminder_enabled`` defaults to OFF so a
+  // brand-new alert notifies once and nothing repeats; setting it to
+  // true lets ``reminder_minutes`` (clamped into 5..1440) gate repeats.
+  const reminderEnabled = settings.reminder_enabled === true;
+  const reminderMinutes = (typeof settings.reminder_minutes === "number" && settings.reminder_minutes >= 5)
+    ? settings.reminder_minutes
+    : defaults.reminder_minutes;
+  const cooldownMs = reminderMinutes * 60 * 1000;
   const identity = notificationAlertIdentity(summary);
   const prev = Array.isArray(previousIdentity) ? previousIdentity : [];
   const state = (previousState && typeof previousState === "object") ? previousState : {};
@@ -364,17 +379,20 @@ function notificationDecisions(
         // still gates any future re-fire at this provider.
         return;
       }
-      // Same level, same provider — only re-fire if the cooldown
-      // already elapsed (i.e. the previous fire was long enough ago).
+      // Same level, same provider — only re-fire if repeat reminders are
+      // enabled AND the previous fire was long enough ago. With the
+      // default OFF switch, an already-notified alert is silent until it
+      // leaves the snapshot and returns.
       const lastFired = nextCooldown[key];
+      if (!reminderEnabled) return;
       if (typeof lastFired !== "number" || cooldownMs <= 0 || (now - lastFired) >= cooldownMs) {
         toFire.push(item);
         nextCooldown[key] = now;
       }
       return;
     }
-    // Fresh identity or an escalation: respect cooldown the same way so
-    // a brand-new critical alert that lands inside a cooldown window
+    // Fresh identity or an escalation: respect the cooldown the same way
+    // so a brand-new critical alert that lands inside a reminder window
     // (e.g. the operator just opened the page during an outage) still
     // does not re-fire if the same identity fired moments ago.
     const lastFired = nextCooldown[key];
@@ -401,6 +419,26 @@ function notificationDecisions(
     cooldownMap: nextCooldown,
     allowed: allowed,
   };
+}
+
+// Notification click handler. The dashboard is mounted at
+// ``/quota-console`` so a click should only navigate when the page is
+// genuinely elsewhere (Hermes notification drawer, etc.). When the
+// operator already has the dashboard tab open, the click just raises
+// the window — without this guard a single click reloads the page and
+// wipes the in-memory notification identity / cooldown map, which in
+// turn re-fires the same alert as soon as the next poll lands.
+function focusQuotaConsoleOnClick() {
+  try {
+    if (typeof window.focus === "function") window.focus();
+    const path = (window.location && typeof window.location.pathname === "string")
+      ? window.location.pathname
+      : "";
+    if (path && path.indexOf("/quota-console") !== -1) return;
+    if (typeof window.location.assign === "function") {
+      window.location.assign("/quota-console");
+    }
+  } catch (error) { /* navigation is best-effort */ }
 }
 
 // Build the title/body pair the Notification API consumes. Pure, so
@@ -804,24 +842,29 @@ function notificationBody(item) {
     // control drives the same ``notificationDraft`` state the Settings
     // dialog PUTs as a single ``notifications`` block. Permission is
     // requested on the explicit "Enable" click so the browser never
-    // asks for it on page load.
+    // asks for it on page load. The pill state is refreshed
+    // automatically — on window focus, on tab visibility change, and
+    // whenever the operator changes a control — so the dashboard no
+    // longer carries a manual "Refresh status" button.
     const initial = props.initial || {};
     const schema = props.schema || {};
     const levels = Array.isArray(schema.notification_levels) && schema.notification_levels.length > 0
       ? schema.notification_levels
       : NOTIFICATION_LEVELS;
-    const cooldownMin = typeof schema.notification_cooldown_min === "number"
-      ? schema.notification_cooldown_min : 0;
-    const cooldownMax = typeof schema.notification_cooldown_max === "number"
-      ? schema.notification_cooldown_max : 24 * 60;
+    const reminderMin = typeof schema.notification_reminder_min === "number"
+      ? schema.notification_reminder_min : 5;
+    const reminderMax = typeof schema.notification_reminder_max === "number"
+      ? schema.notification_reminder_max : 24 * 60;
     const [draft, setDraft] = useState(function () {
       return {
         enabled: typeof initial.enabled === "boolean" ? initial.enabled : NOTIFICATION_DEFAULTS.enabled,
         levels: Array.isArray(initial.levels) && initial.levels.length > 0
           ? initial.levels.slice()
           : NOTIFICATION_DEFAULTS.levels.slice(),
-        cooldown_minutes: typeof initial.cooldown_minutes === "number" && initial.cooldown_minutes >= 0
-          ? initial.cooldown_minutes : NOTIFICATION_DEFAULTS.cooldown_minutes,
+        reminder_enabled: typeof initial.reminder_enabled === "boolean"
+          ? initial.reminder_enabled : NOTIFICATION_DEFAULTS.reminder_enabled,
+        reminder_minutes: typeof initial.reminder_minutes === "number" && initial.reminder_minutes >= reminderMin
+          ? initial.reminder_minutes : NOTIFICATION_DEFAULTS.reminder_minutes,
       };
     });
     const [permission, setPermission] = useState(function () {
@@ -854,12 +897,15 @@ function notificationBody(item) {
         return Object.assign({}, prev, { levels: nextLevels });
       });
     }
-    function updateCooldown(value) {
+    function toggleReminderEnabled(next) {
+      setDraft(function (prev) { return Object.assign({}, prev, { reminder_enabled: Boolean(next) }); });
+    }
+    function updateReminderMinutes(value) {
       setDraft(function (prev) {
         const numeric = Number(value);
         if (!Number.isFinite(numeric)) return prev;
-        const clamped = Math.max(cooldownMin, Math.min(cooldownMax, Math.round(numeric)));
-        return Object.assign({}, prev, { cooldown_minutes: clamped });
+        const clamped = Math.max(reminderMin, Math.min(reminderMax, Math.round(numeric)));
+        return Object.assign({}, prev, { reminder_minutes: clamped });
       });
     }
     function refreshPermission() {
@@ -908,26 +954,45 @@ function notificationBody(item) {
           tag: "quota-console-test",
         });
         if (test && typeof test.addEventListener === "function") {
-          test.addEventListener("click", function () {
-            try {
-              if (typeof window.focus === "function") window.focus();
-              window.location.assign("/quota-console");
-            } catch (error) { /* navigation is best-effort */ }
-          });
+          test.addEventListener("click", focusQuotaConsoleOnClick);
         }
       } catch (error) {
         setPermissionError("Could not send a test notification.");
       }
     }
 
-    // Push draft up so the dialog body picks it up in the next PUT.
+// Push draft up so the dialog body picks it up in the next PUT.
     // The save() handler below serialises ``props.draft`` — we copy ours
-    // back into this.draft through props.onChange.
+    // back into this.draft through props.onChange. The dependency list
+    // also refreshes the permission pill whenever any notification
+    // control changes — the operator can see the live grant state
+    // without clicking a separate Refresh button.
     useEffect(function () {
+      refreshPermission();
       if (typeof props.onChange === "function") {
         props.onChange(draft);
       }
-    }, [draft.enabled, draft.levels.join(","), draft.cooldown_minutes]);
+    }, [draft.enabled, draft.levels.join(","), draft.reminder_enabled, draft.reminder_minutes]);
+    // Window focus / tab visibility also re-read the permission so the
+    // pill stays accurate when the operator toggles site permissions in
+    // a different tab and returns to the dashboard.
+    useEffect(function () {
+      function onFocus() { refreshPermission(); }
+      function onVisibility() {
+        if (typeof document === "undefined") return;
+        if (document.visibilityState === "visible") refreshPermission();
+      }
+      window.addEventListener("focus", onFocus);
+      if (typeof document !== "undefined") {
+        document.addEventListener("visibilitychange", onVisibility);
+      }
+      return function () {
+        window.removeEventListener("focus", onFocus);
+        if (typeof document !== "undefined") {
+          document.removeEventListener("visibilitychange", onVisibility);
+        }
+      };
+    }, []);
 
     const permissionLabel = permission === "granted"
       ? "Permission granted"
@@ -952,7 +1017,7 @@ function notificationBody(item) {
         "p",
         { className: "usages-settings-field-hint" },
         "Browser notifications are off until you turn them on. ",
-        "They only fire while this dashboard tab is open or in the background — ",
+        "They only fire while this dashboard tab is open or in the background \u2014 ",
         "closed tabs are out of scope for this version.",
       ),
       h(
@@ -994,21 +1059,32 @@ function notificationBody(item) {
       ),
       h(
         "div",
-        { className: "usages-settings-notifications-cooldown" },
+        { className: "usages-settings-notifications-reminder" },
         h(
           "label",
-          { htmlFor: "usages-notifications-cooldown-input" },
-          "Cooldown between repeats (minutes)",
+          { className: "usages-settings-notifications-reminder-toggle" },
+          h("input", {
+            type: "checkbox",
+            checked: Boolean(draft.reminder_enabled),
+            onChange: function (event) { toggleReminderEnabled(Boolean(event.target.checked)); },
+            "aria-describedby": "usages-notifications-description",
+          }),
+          h("span", null, "Remind me again"),
+        ),
+        h(
+          "label",
+          { htmlFor: "usages-notifications-reminder-input" },
+          "Remind me again after (minutes)",
         ),
         h("input", {
-          id: "usages-notifications-cooldown-input",
+          id: "usages-notifications-reminder-input",
           type: "number",
-          min: cooldownMin,
-          max: cooldownMax,
+          min: reminderMin,
+          max: reminderMax,
           step: 1,
-          value: draft.cooldown_minutes,
-          onChange: function (event) { updateCooldown(event.target.value); },
-          disabled: !draft.enabled,
+          value: draft.reminder_minutes,
+          onChange: function (event) { updateReminderMinutes(event.target.value); },
+          disabled: !draft.enabled || !draft.reminder_enabled,
           "aria-describedby": "usages-notifications-description",
         }),
       ),
@@ -1040,11 +1116,6 @@ function notificationBody(item) {
                 },
                 "Enable browser notifications",
               ),
-        h(
-          Button,
-          { type: "button", size: "sm", variant: "ghost", onClick: refreshPermission },
-          "Refresh status",
-        ),
       ),
       permissionError
         ? h("p", { className: "usages-settings-error", role: "alert" }, permissionError)
@@ -1052,7 +1123,7 @@ function notificationBody(item) {
       h(
         "p",
         { id: "usages-notifications-description", className: "usages-settings-notifications-note" },
-        "Notifications follow the existing alert set: a new alert fires once, repeats are deduped per provider and level, and the cooldown suppresses back-to-back duplicates while the page stays open.",
+        "Notifications follow the existing alert set: a new alert fires once, repeats are off by default \u2014 turn on \u201cRemind me again\u201d to receive a reminder after the minutes you set.",
       ),
     );
   }
@@ -1073,13 +1144,16 @@ function notificationBody(item) {
       return Object.assign({}, initial.providers || {});
     });
     const [draftNotifications, setDraftNotifications] = useState(function () {
+      const initial = initialNotifications || {};
       return {
-        enabled: typeof initialNotifications.enabled === "boolean"
-          ? initialNotifications.enabled : NOTIFICATION_DEFAULTS.enabled,
-        levels: Array.isArray(initialNotifications.levels) && initialNotifications.levels.length > 0
-          ? initialNotifications.levels.slice() : NOTIFICATION_DEFAULTS.levels.slice(),
-        cooldown_minutes: typeof initialNotifications.cooldown_minutes === "number"
-          ? initialNotifications.cooldown_minutes : NOTIFICATION_DEFAULTS.cooldown_minutes,
+        enabled: typeof initial.enabled === "boolean"
+          ? initial.enabled : NOTIFICATION_DEFAULTS.enabled,
+        levels: Array.isArray(initial.levels) && initial.levels.length > 0
+          ? initial.levels.slice() : NOTIFICATION_DEFAULTS.levels.slice(),
+        reminder_enabled: typeof initial.reminder_enabled === "boolean"
+          ? initial.reminder_enabled : NOTIFICATION_DEFAULTS.reminder_enabled,
+        reminder_minutes: typeof initial.reminder_minutes === "number" && initial.reminder_minutes >= 5
+          ? initial.reminder_minutes : NOTIFICATION_DEFAULTS.reminder_minutes,
       };
     });
     // A provider section opens on mount when it already carries overrides
@@ -1132,13 +1206,16 @@ function notificationBody(item) {
     function resetDraft() {
       setDraftDefaults(Object.assign({}, initial.defaults || {}));
       setDraftProviders(Object.assign({}, initial.providers || {}));
+      const initial = initialNotifications || {};
       setDraftNotifications({
-        enabled: typeof initialNotifications.enabled === "boolean"
-          ? initialNotifications.enabled : NOTIFICATION_DEFAULTS.enabled,
-        levels: Array.isArray(initialNotifications.levels) && initialNotifications.levels.length > 0
-          ? initialNotifications.levels.slice() : NOTIFICATION_DEFAULTS.levels.slice(),
-        cooldown_minutes: typeof initialNotifications.cooldown_minutes === "number"
-          ? initialNotifications.cooldown_minutes : NOTIFICATION_DEFAULTS.cooldown_minutes,
+        enabled: typeof initial.enabled === "boolean"
+          ? initial.enabled : NOTIFICATION_DEFAULTS.enabled,
+        levels: Array.isArray(initial.levels) && initial.levels.length > 0
+          ? initial.levels.slice() : NOTIFICATION_DEFAULTS.levels.slice(),
+        reminder_enabled: typeof initial.reminder_enabled === "boolean"
+          ? initial.reminder_enabled : NOTIFICATION_DEFAULTS.reminder_enabled,
+        reminder_minutes: typeof initial.reminder_minutes === "number" && initial.reminder_minutes >= 5
+          ? initial.reminder_minutes : NOTIFICATION_DEFAULTS.reminder_minutes,
       });
       setError(null);
     }
@@ -1172,7 +1249,7 @@ function notificationBody(item) {
         className: "usages-settings-overlay",
         role: "dialog",
         "aria-modal": "true",
-        "aria-label": "Provider settings",
+        "aria-label": "Settings",
         onClick: function (event) {
           if (event.target === event.currentTarget && !saving) props.onClose();
         },
@@ -1183,17 +1260,25 @@ function notificationBody(item) {
         h(
           "div",
           { className: "usages-settings-header" },
-          h("h2", { className: "usages-settings-title" }, "Provider settings"),
-          h(
-            "p",
-            { className: "usages-settings-description" },
-            "Global defaults apply to every provider. Override a field per provider to diverge from them. Thresholds are off unless explicitly set \u2014 no alerts are raised until you turn one on.",
-          ),
+          h("h2", { className: "usages-settings-title" }, "Settings"),
+        ),
+        h(
+          NotificationsSection,
+          {
+            initial: draftNotifications,
+            schema: schema,
+            onChange: setDraftNotifications,
+          },
         ),
         h(
           "section",
           { className: "usages-settings-section" },
           h("h3", { className: "usages-settings-section-title" }, "Global defaults"),
+          h(
+            "p",
+            { className: "usages-settings-description usages-settings-description--section" },
+            "Global defaults apply to every provider. Override a field per provider to diverge from them. Thresholds are off unless explicitly set \u2014 no alerts are raised until you turn one on.",
+          ),
           SETTINGS_FIELDS.filter(function (field) { return field !== "note"; }).map(function (field) {
             return h(SettingsFieldRow, {
               key: "default-" + field,
@@ -1276,14 +1361,6 @@ function notificationBody(item) {
         ),
         error ? h("p", { className: "usages-settings-error", role: "alert" }, error) : null,
         h(
-          NotificationsSection,
-          {
-            initial: draftNotifications,
-            schema: schema,
-            onChange: setDraftNotifications,
-          },
-        ),
-        h(
           "div",
           { className: "usages-settings-footer" },
           h(
@@ -1339,12 +1416,7 @@ function notificationBody(item) {
             tag: "quota-console-" + item.level + "-" + item.provider,
           });
           if (note && typeof note.addEventListener === "function") {
-            note.addEventListener("click", function () {
-              try {
-                if (typeof window.focus === "function") window.focus();
-                window.location.assign("/quota-console");
-              } catch (error) { /* navigation is best-effort */ }
-            });
+            note.addEventListener("click", focusQuotaConsoleOnClick);
           }
         } catch (error) {
           // Some browsers throw on duplicate tags inside the cooldown
@@ -1364,13 +1436,33 @@ function notificationBody(item) {
     // Browser-notification opt-in state. Mirrored from the server-side
     // settings block on first summary, then kept in lockstep so the
     // firing logic uses the operator's most recent choice even before
-    // the next PUT round-trip lands.
+    // the next PUT round-trip lands. ``identity`` + ``cooldownMap`` are
+    // persisted to sessionStorage so an F5 / hard reload can never
+    // re-fire an alert that was already notified — the click handler
+    // likewise avoids a page reload when the dashboard is already open.
+    const SESSION_KEY = "quota-console-notification-memory";
     const [notifications, setNotifications] = useState(function () {
-      return {
+      const base = {
         identity: [],
         cooldownMap: {},
         settings: Object.assign({}, NOTIFICATION_DEFAULTS),
       };
+      try {
+        const raw = window.sessionStorage.getItem(SESSION_KEY);
+        if (!raw) return base;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") return base;
+        const identity = Array.isArray(parsed.identity) ? parsed.identity : [];
+        const cooldownMap = (parsed.cooldownMap && typeof parsed.cooldownMap === "object")
+          ? parsed.cooldownMap : {};
+        const settings = (parsed.settings && typeof parsed.settings === "object")
+          ? Object.assign({}, NOTIFICATION_DEFAULTS, parsed.settings)
+          : Object.assign({}, NOTIFICATION_DEFAULTS);
+        return { identity: identity, cooldownMap: cooldownMap, settings: settings };
+      } catch (error) {
+        // Private mode / disabled storage: fall back to in-memory state.
+        return base;
+      }
     });
     // Ref mirror so the 60s poll always reads the latest opt-in without
     // rebuilding the timer every time the operator flips a checkbox in
@@ -1378,6 +1470,15 @@ function notificationBody(item) {
     // classic React foot-gun; the ref keeps the load() closure fresh.
     const notificationsRef = useRef(notifications);
     notificationsRef.current = notifications;
+    // Persist the notification memory (identity + cooldownMap + settings)
+    // on every change. sessionStorage keeps the data alive across F5 but
+    // it dies with the tab, which is exactly the scope we want — a fresh
+    // tab gets a fresh slate, no surprise re-fires.
+    useEffect(function () {
+      try {
+        window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(notifications));
+      } catch (error) { /* storage unavailable: keep state for the live tab only */ }
+    }, [notifications.identity, notifications.cooldownMap, notifications.settings]);
     const [hiddenProviders, setHiddenProviders] = useState(function () {
       try {
         const raw = window.localStorage.getItem("quota-console-hidden-providers");

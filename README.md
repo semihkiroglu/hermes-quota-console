@@ -27,8 +27,8 @@ tab.
 - **Browser notifications (opt-in)** — receive a native browser
   notification when a critical (out of quota / rate-limited / auth
   failed) or low (running low) alert lands while the dashboard tab is
-  open or in the background. Per-alert cooldown, dedupe, and a
-  permission gate; off by default
+  open or in the background. Per-alert dedupe, an opt-in repeat
+  reminder, and a permission gate; off by default
 - **Row-level reset** — the button shown when Hermes blocks usage
   (rate-limited/degraded) lifts the block so you can continue; it never
   touches credentials
@@ -89,24 +89,29 @@ Then restart the Hermes dashboard process. The `/quota-console` route and
   low/exhausted quota, a Hermes usage block (rate-limited/degraded), or an
   auth failure. It polls the same 30s-cached summary every 60s and links into
   this page. Transient "unavailable" fetch failures never raise the strip.
-- **Version**: the footer shows the plugin version (`v0.2.0`) read from
+- **Version**: the footer shows the plugin version (`v0.2.1`) read from
   `pyproject.toml`, matching the GitHub release tag.
 - **Settings**: alert thresholds are configured in two layers — global
   defaults first, then per-provider overrides. No alerts fire until a
-  threshold is set. The bottom of the Settings dialog adds a
-  "Notifications" opt-in block: master toggle, alert levels
-  (`critical` / `low`), cooldown in minutes, and a permission gate that
-  only asks for the browser permission when you click "Enable browser
-  notifications".
+  threshold is set. The Settings dialog opens with a "Notifications"
+  section: master toggle, alert levels (`critical` / `low`), an opt-in
+  "Remind me again" switch with a 5..1440-minute cadence, and a
+  permission gate that only asks for the browser permission when you
+  click "Enable browser notifications". The pill re-reads the live
+  permission on focus / tab visibility — no manual Refresh button.
 - **Notifications**: configured in Settings and rendered with the
   browser's `Notification` API while the dashboard tab is open or
   in the background. The check piggy-backs on the 60-second summary
   poll: a new alert (a critical exhaustion, a provider rate-limited by
   Hermes, an auth failure, etc.) fires a notification the first time it
-  shows up; repeats on the same identity are deduped by the per-alert
-  cooldown. **Tab-closed delivery is not supported in this version.**
-  Closing the tab silences notifications; alerts still surface inside
-  the dashboard on the next visit.
+  shows up; the per-alert dedupe keeps repeats quiet until either the
+  identity leaves the snapshot or, when "Remind me again" is on, the
+  configured minutes have passed. The click handler focuses the
+  dashboard tab without reloading the page, and the per-alert dedupe
+  memory survives an F5 via sessionStorage so a reload can never
+  re-fire an already-notified alert. **Tab-closed delivery is not
+  supported in this version.** Closing the tab silences notifications;
+  alerts still surface inside the dashboard on the next visit.
 - **Customize**: hide/show cards and drag-to-reorder mode. Hidden cards show
   as compact rows in this mode only and return with one click.
 - **Reset**: "Reset usage" on a profile row appears only when Hermes blocked
