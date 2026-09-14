@@ -894,8 +894,8 @@ def _build_summary() -> dict[str, Any]:
             "schema": {
                 "note_max_length": _settings.note_max_length(),
                 "notification_levels": list(_settings.notification_levels()),
-                "notification_cooldown_min": 0,
-                "notification_cooldown_max": 24 * 60,
+                "notification_reminder_min": _settings.notification_reminder_minutes()[0],
+                "notification_reminder_max": _settings.notification_reminder_minutes()[1],
             },
             "storage_path": str(_settings.storage_path()),
         },
@@ -1006,8 +1006,8 @@ async def get_settings() -> dict[str, Any]:
         "schema": {
             "note_max_length": _settings.note_max_length(),
             "notification_levels": list(_settings.notification_levels()),
-            "notification_cooldown_min": 0,
-            "notification_cooldown_max": 24 * 60,
+            "notification_reminder_min": _settings.notification_reminder_minutes()[0],
+                "notification_reminder_max": _settings.notification_reminder_minutes()[1],
         },
         "storage_path": str(_settings.storage_path()),
     }
@@ -1021,11 +1021,11 @@ async def put_settings(request: Request, payload: dict[str, Any]) -> dict[str, A
     multi-line notes, and notes longer than 120 characters are rejected with
     HTTP 400. The ``notifications`` block is validated through the same
     fail-closed pipeline: unknown fields, non-boolean ``enabled``,
-    non-array ``levels``, unknown level names, empty levels, and
-    ``cooldown_minutes`` out of ``[0, 1440]`` all return HTTP 400. The
-    storage file is rewritten atomically (write-temp + os.replace under a
-    process-local lock) and the summary cache is invalidated so the next
-    read returns the new effective view.
+    non-boolean ``reminder_enabled``, non-array ``levels``, unknown level
+    names, empty levels, and ``reminder_minutes`` outside ``[5, 1440]``
+    all return HTTP 400. The storage file is rewritten atomically
+    (write-temp + os.replace under a process-local lock) and the summary
+    cache is invalidated so the next read returns the new effective view.
     """
     origin = request.headers.get("origin")
     if origin:
@@ -1065,8 +1065,8 @@ async def put_settings(request: Request, payload: dict[str, Any]) -> dict[str, A
         "schema": {
             "note_max_length": _settings.note_max_length(),
             "notification_levels": list(_settings.notification_levels()),
-            "notification_cooldown_min": 0,
-            "notification_cooldown_max": 24 * 60,
+            "notification_reminder_min": _settings.notification_reminder_minutes()[0],
+                "notification_reminder_max": _settings.notification_reminder_minutes()[1],
         },
         "storage_path": str(_settings.storage_path()),
     }

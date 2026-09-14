@@ -333,24 +333,29 @@ def test_validate_payload_accepts_notifications_block(isolated_settings):
         "notifications": {
             "enabled": True,
             "levels": ["critical", "low"],
-            "cooldown_minutes": 30,
+            "reminder_enabled": True,
+            "reminder_minutes": 30,
         },
     })
     assert notifications == {
         "enabled": True,
         "levels": ["critical", "low"],
-        "cooldown_minutes": 30,
+        "reminder_enabled": True,
+        "reminder_minutes": 30,
     }
 
 
 def test_validate_payload_defaults_notifications_when_missing(isolated_settings):
     s = isolated_settings.module
     _, _, notifications = s.validate_payload({"defaults": {}, "providers": {}})
-    # opt-in, conservative levels, sane cooldown
+    # Opt-in, conservative levels, repeats OFF by default. The
+    # repeat-reminder switch is the operator's choice; nothing repeats
+    # until they turn it on.
     assert notifications == {
         "enabled": False,
         "levels": ["critical"],
-        "cooldown_minutes": 60,
+        "reminder_enabled": False,
+        "reminder_minutes": 60,
     }
 
 
@@ -361,11 +366,13 @@ def test_validate_payload_defaults_individual_notification_fields(isolated_setti
         "providers": {},
         "notifications": {"enabled": True},
     })
-    # ``levels`` and ``cooldown_minutes`` fall back to the built-in defaults.
+    # ``levels``, ``reminder_enabled``, and ``reminder_minutes`` fall back
+    # to the built-in defaults so partial PUTs round-trip cleanly.
     assert notifications == {
         "enabled": True,
         "levels": ["critical"],
-        "cooldown_minutes": 60,
+        "reminder_enabled": False,
+        "reminder_minutes": 60,
     }
 
 
@@ -426,29 +433,35 @@ def test_validate_payload_rejects_empty_levels(isolated_settings):
         s.validate_payload({"notifications": {"levels": []}})
 
 
-def test_validate_payload_rejects_cooldown_below_minimum(isolated_settings):
+def test_validate_payload_rejects_reminder_minutes_below_minimum(isolated_settings):
     s = isolated_settings.module
-    with pytest.raises(s.SettingsValidationError, match="must be in 0\\.\\.1440"):
-        s.validate_payload({"notifications": {"cooldown_minutes": -1}})
+    with pytest.raises(s.SettingsValidationError, match="must be in 5\\.\\.1440"):
+        s.validate_payload({"notifications": {"reminder_minutes": 4}})
 
 
-def test_validate_payload_rejects_cooldown_above_24h(isolated_settings):
+def test_validate_payload_rejects_reminder_minutes_above_24h(isolated_settings):
     s = isolated_settings.module
-    with pytest.raises(s.SettingsValidationError, match="must be in 0\\.\\.1440"):
-        s.validate_payload({"notifications": {"cooldown_minutes": 24 * 60 + 1}})
+    with pytest.raises(s.SettingsValidationError, match="must be in 5\\.\\.1440"):
+        s.validate_payload({"notifications": {"reminder_minutes": 24 * 60 + 1}})
 
 
-def test_validate_payload_rejects_non_integer_cooldown(isolated_settings):
+def test_validate_payload_rejects_non_integer_reminder_minutes(isolated_settings):
     s = isolated_settings.module
-    with pytest.raises(s.SettingsValidationError, match="must be an integer in 0"):
-        s.validate_payload({"notifications": {"cooldown_minutes": "60"}})
+    with pytest.raises(s.SettingsValidationError, match="must be an integer in 5"):
+        s.validate_payload({"notifications": {"reminder_minutes": "60"}})
 
 
-def test_validate_payload_rejects_bool_cooldown(isolated_settings):
+def test_validate_payload_rejects_bool_reminder_minutes(isolated_settings):
     s = isolated_settings.module
     # bool is an int subclass; the validator must explicitly reject it.
-    with pytest.raises(s.SettingsValidationError, match="must be an integer in 0"):
-        s.validate_payload({"notifications": {"cooldown_minutes": True}})
+    with pytest.raises(s.SettingsValidationError, match="must be an integer in 5"):
+        s.validate_payload({"notifications": {"reminder_minutes": True}})
+
+
+def test_validate_payload_rejects_non_bool_reminder_enabled(isolated_settings):
+    s = isolated_settings.module
+    with pytest.raises(s.SettingsValidationError, match="reminder_enabled must be a boolean"):
+        s.validate_payload({"notifications": {"reminder_enabled": "yes"}})
 
 
 def test_load_raw_supplies_default_notifications_when_missing(isolated_settings):
@@ -489,20 +502,23 @@ def test_save_round_trips_notifications_block(isolated_settings):
         "notifications": {
             "enabled": True,
             "levels": ["low"],
-            "cooldown_minutes": 5,
+            "reminder_enabled": True,
+            "reminder_minutes": 5,
         },
     })
     assert cleaned["notifications"] == {
         "enabled": True,
         "levels": ["low"],
-        "cooldown_minutes": 5,
+        "reminder_enabled": True,
+        "reminder_minutes": 5,
     }
     # Reload from disk and confirm the block survives.
     raw = s.load_raw()
     assert raw["notifications"] == {
         "enabled": True,
         "levels": ["low"],
-        "cooldown_minutes": 5,
+        "reminder_enabled": True,
+        "reminder_minutes": 5,
     }
 
 
