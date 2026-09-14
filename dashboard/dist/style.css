@@ -801,7 +801,7 @@
 .usages-settings-description {
   margin: 0;
   color: var(--color-muted-foreground);
-  font-size: 0.86rem;
+  font-size: 0.78rem;
   line-height: 1.4;
 }
 
@@ -890,7 +890,7 @@
 
 .usages-settings-field-hint {
   margin: 4px 0 0;
-  font-size: 0.86rem;
+  font-size: 0.78rem;
   color: var(--color-muted-foreground);
   line-height: 1.35;
 }
@@ -1135,13 +1135,9 @@
   opacity: 0.55;
 }
 
-.usages-settings-notifications-reminder-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+.usages-settings-notifications-reminder-title {
   font-size: 0.88rem;
   font-weight: 600;
-  cursor: pointer;
 }
 
 .usages-settings-notifications-reminder-control {

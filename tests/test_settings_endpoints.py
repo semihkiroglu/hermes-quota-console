@@ -93,7 +93,7 @@ def test_settings_get_returns_defaults_and_effective(isolated_plugin_api):
     # Notification schema mirrors the validator so the dialog can render
     # the right controls without hardcoding constants.
     assert body["schema"]["notification_levels"] == ["critical", "low"]
-    assert body["schema"]["notification_reminder_min"] == 5
+    assert body["schema"]["notification_reminder_min"] == 0
     assert body["schema"]["notification_reminder_max"] == 24 * 60
     assert body["storage_path"].endswith("config.json")
 
@@ -287,7 +287,6 @@ def test_settings_put_persists_notifications_and_returns_them(isolated_plugin_ap
             "notifications": {
                 "enabled": True,
                 "levels": ["critical", "low"],
-                "reminder_enabled": True,
                 "reminder_minutes": 15,
             },
         },
@@ -297,7 +296,6 @@ def test_settings_put_persists_notifications_and_returns_them(isolated_plugin_ap
     assert body["notifications"] == {
         "enabled": True,
         "levels": ["critical", "low"],
-        "reminder_enabled": True,
         "reminder_minutes": 15,
     }
     # Round-trip from disk
@@ -375,13 +373,12 @@ def test_settings_get_reflects_persisted_notifications(isolated_plugin_api):
     api._settings.save({
         "defaults": {},
         "providers": {},
-        "notifications": {"enabled": True, "levels": ["low"], "reminder_enabled": True, "reminder_minutes": 5},
+        "notifications": {"enabled": True, "levels": ["low"], "reminder_minutes": 5},
     })
     body = _client(api).get("/settings").json()
     assert body["notifications"] == {
         "enabled": True,
         "levels": ["low"],
-        "reminder_enabled": True,
         "reminder_minutes": 5,
     }
 
@@ -391,13 +388,12 @@ def test_summary_settings_block_carries_notifications(isolated_plugin_api):
     api._settings.save({
         "defaults": {"window_low_percent": 25},
         "providers": {"deepseek": {"note": "prod"}},
-        "notifications": {"enabled": True, "levels": ["critical"], "reminder_enabled": True, "reminder_minutes": 30},
+        "notifications": {"enabled": True, "levels": ["critical"], "reminder_minutes": 30},
     })
     summary = api._cached_summary()
     assert summary["settings"]["notifications"] == {
         "enabled": True,
         "levels": ["critical"],
-        "reminder_enabled": True,
         "reminder_minutes": 30,
     }
     # Schema is also surfaced so the dialog can use it.

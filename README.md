@@ -94,9 +94,9 @@ Then restart the Hermes dashboard process. The `/quota-console` route and
 - **Settings**: alert thresholds are configured in two layers — global
   defaults first, then per-provider overrides. No alerts fire until a
   threshold is set. The Settings dialog opens with a "Notifications"
-  section: master toggle, alert levels (`critical` / `low`), an opt-in
-  "Remind me again" switch with a 5..1440-minute cadence, and a
-  permission gate that only asks for the browser permission when you
+  section: master toggle, alert levels (`critical` / `low`), a
+  "Remind me again" interval in minutes (zero switches repeats off, up
+  to 1440), and a permission gate that only asks for the browser permission when you
   click "Enable browser notifications". The pill re-reads the live
   permission on focus / tab visibility — no manual Refresh button.
 - **Notifications**: configured in Settings and rendered with the
