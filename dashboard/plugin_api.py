@@ -30,6 +30,7 @@ from typing import Any, Literal, Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 # Hermes loads plugin_api.py as a standalone module via spec_from_file_location.
@@ -976,6 +977,23 @@ async def reset_rate_limits(
         _CACHE_AT = 0.0
     result["summary"] = await asyncio.to_thread(_cached_summary)
     return result
+
+
+@router.get("/sw.js", include_in_schema=False)
+def notification_worker() -> FileResponse:
+    """Serve the notification service worker.
+
+    Android Chrome refuses to construct ``Notification`` objects from a page
+    ("Illegal constructor. Use ServiceWorkerRegistration.showNotification
+    instead."), so the bundle renders every notification through this worker.
+    The dashboard serves only the assets its manifest names, which is why the
+    worker needs a route of its own; the file itself is a plain static asset.
+    """
+    return FileResponse(
+        _DASHBOARD_DIR / "dist" / "sw.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @router.get("/settings")

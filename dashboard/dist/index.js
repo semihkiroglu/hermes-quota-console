@@ -426,7 +426,7 @@ function notificationDecisions(
 // Service worker that renders every notification. Android Chrome throws on
 // ``new Notification(...)`` from a page ("Illegal constructor"), so the worker
 // is the only path that behaves the same on mobile and desktop.
-const NOTIFICATION_WORKER_URL = "/api/plugins/quota-console/dist/sw.js";
+const NOTIFICATION_WORKER_URL = "/api/plugins/quota-console/sw.js";
 
 let notificationRegistration = null;
 

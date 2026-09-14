@@ -11,6 +11,9 @@ import json
 import pathlib
 import subprocess
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 WORKER = pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "dist" / "sw.js"
 
 _TEMPLATE = """
@@ -60,3 +63,18 @@ def test_click_opens_the_dashboard_when_no_tab_is_open():
     assert state["closed"] is True
     assert state["focused"] is False
     assert state["opened"] is True
+
+
+def test_worker_route_serves_the_script(plugin_api):
+    """The worker ships from its own route.
+
+    The dashboard only serves the assets its manifest names, so the worker
+    needs an endpoint of its own — a 404 here would leave Android phones with
+    no working notification path at all.
+    """
+    app = FastAPI()
+    app.include_router(plugin_api.router)
+    response = TestClient(app).get("/sw.js")
+    assert response.status_code == 200
+    assert "javascript" in response.headers["content-type"]
+    assert "notificationclick" in response.text
