@@ -60,7 +60,7 @@ def isolated_settings(tmp_path, monkeypatch):
 
 def test_validate_payload_accepts_two_layer_shape(isolated_settings):
     s = isolated_settings.module
-    defaults, providers = s.validate_payload({
+    defaults, providers, notifications = s.validate_payload({
         "defaults": {"window_low_percent": 25},
         "providers": {
             "deepseek": {"note": "prod key"},
@@ -68,6 +68,10 @@ def test_validate_payload_accepts_two_layer_shape(isolated_settings):
     })
     assert defaults == {"window_low_percent": 25}
     assert providers == {"deepseek": {"note": "prod key"}}
+    # ``notifications`` defaults are merged in even when the operator
+    # omits the block — the dialog relies on this so a partial PUT
+    # round-trips cleanly.
+    assert notifications == s.builtin_notifications()
 
 
 def test_validate_payload_rejects_unknown_top_level_keys(isolated_settings):
@@ -228,7 +232,9 @@ def test_save_overwrites_stale_disk_content(isolated_settings):
     s = isolated_settings.module
     isolated_settings.path.write_text("garbage", encoding="utf-8")
     cleaned = s.save({"defaults": {}, "providers": {}})
-    assert cleaned == {"defaults": {}, "providers": {}}
+    assert cleaned["defaults"] == {}
+    assert cleaned["providers"] == {}
+    assert cleaned["notifications"] == s.builtin_notifications()
     assert json.loads(isolated_settings.path.read_text(encoding="utf-8")) == cleaned
 
 
@@ -255,7 +261,12 @@ def test_load_raw_returns_empty_on_corrupt_json(isolated_settings):
     s = isolated_settings.module
     isolated_settings.path.write_text("{not-json", encoding="utf-8")
     raw = s.load_raw()
-    assert raw == {"defaults": {}, "providers": {}}
+    # Corrupt JSON falls back to a safe empty payload: every layer is
+    # zeroed, and the notifications block carries the built-in defaults
+    # so the dialog can render without an explicit save round-trip.
+    assert raw["defaults"] == {}
+    assert raw["providers"] == {}
+    assert raw["notifications"] == s.builtin_notifications()
 
 
 def test_save_does_not_create_partial_file_on_failure(isolated_settings, monkeypatch, tmp_path):
@@ -307,3 +318,205 @@ def test_storage_path_uses_hermes_plugin_data_dir_when_available(isolated_settin
     resolved = s.storage_path()
     assert resolved.parent == fake_dir / "quota-console"
     assert resolved.name == "config.json"
+
+
+# ---------------------------------------------------------------------------
+# Notifications opt-in block
+# ---------------------------------------------------------------------------
+
+
+def test_validate_payload_accepts_notifications_block(isolated_settings):
+    s = isolated_settings.module
+    defaults, providers, notifications = s.validate_payload({
+        "defaults": {},
+        "providers": {},
+        "notifications": {
+            "enabled": True,
+            "levels": ["critical", "low"],
+            "cooldown_minutes": 30,
+        },
+    })
+    assert notifications == {
+        "enabled": True,
+        "levels": ["critical", "low"],
+        "cooldown_minutes": 30,
+    }
+
+
+def test_validate_payload_defaults_notifications_when_missing(isolated_settings):
+    s = isolated_settings.module
+    _, _, notifications = s.validate_payload({"defaults": {}, "providers": {}})
+    # opt-in, conservative levels, sane cooldown
+    assert notifications == {
+        "enabled": False,
+        "levels": ["critical"],
+        "cooldown_minutes": 60,
+    }
+
+
+def test_validate_payload_defaults_individual_notification_fields(isolated_settings):
+    s = isolated_settings.module
+    _, _, notifications = s.validate_payload({
+        "defaults": {},
+        "providers": {},
+        "notifications": {"enabled": True},
+    })
+    # ``levels`` and ``cooldown_minutes`` fall back to the built-in defaults.
+    assert notifications == {
+        "enabled": True,
+        "levels": ["critical"],
+        "cooldown_minutes": 60,
+    }
+
+
+def test_validate_payload_normalises_notification_level_order(isolated_settings):
+    s = isolated_settings.module
+    _, _, notifications = s.validate_payload({
+        "defaults": {},
+        "providers": {},
+        "notifications": {"levels": ["low", "critical"]},
+    })
+    # Order must match the canonical ("critical", "low") so the on-disk
+    # payload is stable across dialog writes.
+    assert notifications["levels"] == ["critical", "low"]
+
+
+def test_validate_payload_rejects_unknown_top_level_key_with_notifications(isolated_settings):
+    s = isolated_settings.module
+    # The new block does not weaken the existing top-level allowlist.
+    with pytest.raises(s.SettingsValidationError, match="unknown top-level"):
+        s.validate_payload({"notifications": {"enabled": True}, "extra": 1})
+
+
+def test_validate_payload_rejects_non_object_notifications(isolated_settings):
+    s = isolated_settings.module
+    with pytest.raises(s.SettingsValidationError, match="notifications must be an object"):
+        s.validate_payload({"notifications": "enabled"})
+
+
+def test_validate_payload_rejects_unknown_notification_field(isolated_settings):
+    s = isolated_settings.module
+    with pytest.raises(s.SettingsValidationError, match="unknown notifications fields"):
+        s.validate_payload(
+            {"notifications": {"enabled": True, "extra_field": "x"}}
+        )
+
+
+def test_validate_payload_rejects_non_bool_enabled(isolated_settings):
+    s = isolated_settings.module
+    with pytest.raises(s.SettingsValidationError, match="enabled must be a boolean"):
+        s.validate_payload({"notifications": {"enabled": "yes"}})
+
+
+def test_validate_payload_rejects_invalid_level(isolated_settings):
+    s = isolated_settings.module
+    with pytest.raises(s.SettingsValidationError, match="unknown values"):
+        s.validate_payload({"notifications": {"levels": ["critical", "bogus"]}})
+
+
+def test_validate_payload_rejects_non_array_levels(isolated_settings):
+    s = isolated_settings.module
+    with pytest.raises(s.SettingsValidationError, match="must be an array of strings"):
+        s.validate_payload({"notifications": {"levels": "critical"}})
+
+
+def test_validate_payload_rejects_empty_levels(isolated_settings):
+    s = isolated_settings.module
+    with pytest.raises(s.SettingsValidationError, match="at least one value"):
+        s.validate_payload({"notifications": {"levels": []}})
+
+
+def test_validate_payload_rejects_cooldown_below_minimum(isolated_settings):
+    s = isolated_settings.module
+    with pytest.raises(s.SettingsValidationError, match="must be in 0\\.\\.1440"):
+        s.validate_payload({"notifications": {"cooldown_minutes": -1}})
+
+
+def test_validate_payload_rejects_cooldown_above_24h(isolated_settings):
+    s = isolated_settings.module
+    with pytest.raises(s.SettingsValidationError, match="must be in 0\\.\\.1440"):
+        s.validate_payload({"notifications": {"cooldown_minutes": 24 * 60 + 1}})
+
+
+def test_validate_payload_rejects_non_integer_cooldown(isolated_settings):
+    s = isolated_settings.module
+    with pytest.raises(s.SettingsValidationError, match="must be an integer in 0"):
+        s.validate_payload({"notifications": {"cooldown_minutes": "60"}})
+
+
+def test_validate_payload_rejects_bool_cooldown(isolated_settings):
+    s = isolated_settings.module
+    # bool is an int subclass; the validator must explicitly reject it.
+    with pytest.raises(s.SettingsValidationError, match="must be an integer in 0"):
+        s.validate_payload({"notifications": {"cooldown_minutes": True}})
+
+
+def test_load_raw_supplies_default_notifications_when_missing(isolated_settings):
+    s = isolated_settings.module
+    # Old-format payload: no ``notifications`` block. The reader must
+    # backfill the built-in defaults so the dialog renders immediately.
+    isolated_settings.path.write_text(
+        json.dumps({"defaults": {"window_low_percent": 25}, "providers": {}}),
+        encoding="utf-8",
+    )
+    raw = s.load_raw()
+    assert raw["notifications"] == s.builtin_notifications()
+
+
+def test_load_raw_replaces_malformed_notifications_with_defaults(isolated_settings):
+    s = isolated_settings.module
+    # ``levels`` is not a list -> the writer would reject it; the reader
+    # must not crash, just fall back to the safe defaults.
+    isolated_settings.path.write_text(
+        json.dumps(
+            {
+                "defaults": {},
+                "providers": {},
+                "notifications": {"levels": "critical"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    raw = s.load_raw()
+    assert raw["notifications"] == s.builtin_notifications()
+
+
+def test_save_round_trips_notifications_block(isolated_settings):
+    s = isolated_settings.module
+    cleaned = s.save({
+        "defaults": {},
+        "providers": {},
+        "notifications": {
+            "enabled": True,
+            "levels": ["low"],
+            "cooldown_minutes": 5,
+        },
+    })
+    assert cleaned["notifications"] == {
+        "enabled": True,
+        "levels": ["low"],
+        "cooldown_minutes": 5,
+    }
+    # Reload from disk and confirm the block survives.
+    raw = s.load_raw()
+    assert raw["notifications"] == {
+        "enabled": True,
+        "levels": ["low"],
+        "cooldown_minutes": 5,
+    }
+
+
+def test_notifications_block_does_not_leak_credentials(isolated_settings, monkeypatch):
+    """The notifications block is operator-edited browser state. A
+    hostile operator should never be able to store a secret-shaped value
+    in any of its fields; the field types (bool / array of strings /
+    int) reject them by construction. This is a regression guard."""
+    s = isolated_settings.module
+    cleaned = s.save({
+        "defaults": {},
+        "providers": {},
+        "notifications": {"enabled": False},
+    })
+    blob = json.dumps(cleaned)
+    for forbidden in ("api_key", "access_token", "refresh_token", "Bearer "):
+        assert forbidden not in blob

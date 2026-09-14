@@ -982,6 +982,136 @@
   }
 }
 
+/* Notification opt-in section. Sized like the other settings sections
+   (global defaults, per-provider overrides) so the dialog stays
+   visually consistent — the only new shape is the toggle, the level
+   checkboxes, and the cooldown input. Permission pill uses the same
+   muted / destructive tokens as the rest of the dialog. */
+.usages-settings-notifications {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.usages-settings-notifications-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.usages-notifications-permission {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--color-muted);
+  color: var(--color-muted-foreground);
+}
+
+.usages-notifications-permission::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.85;
+}
+
+.usages-notifications-permission--granted {
+  background: rgba(34, 197, 94, 0.16);
+  color: rgb(134, 239, 172);
+}
+
+.usages-notifications-permission--denied,
+.usages-notifications-permission--unsupported {
+  background: rgba(239, 68, 68, 0.16);
+  color: var(--color-destructive);
+}
+
+.usages-notifications-permission--default {
+  background: var(--color-muted);
+  color: var(--color-muted-foreground);
+}
+
+.usages-settings-notifications-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.usages-settings-notifications-levels {
+  border: 1px solid var(--color-muted);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.usages-settings-notifications-levels[disabled] {
+  opacity: 0.55;
+}
+
+.usages-settings-notifications-levels legend {
+  padding: 0 4px;
+}
+
+.usages-settings-notifications-level {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+}
+
+.usages-settings-notifications-cooldown {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.usages-settings-notifications-cooldown label {
+  flex: 1 1 auto;
+  font-size: 0.88rem;
+}
+
+.usages-settings-notifications-cooldown input[type="number"] {
+  width: 90px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-muted);
+  background: var(--color-input, transparent);
+  color: var(--color-foreground);
+  font: inherit;
+  text-align: right;
+}
+
+.usages-settings-notifications-cooldown input[type="number"]:disabled {
+  opacity: 0.55;
+}
+
+.usages-settings-notifications-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.usages-settings-notifications-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--color-muted-foreground);
+}
+
 @media (max-width: 640px) {
   .usages-page {
     padding: 16px;

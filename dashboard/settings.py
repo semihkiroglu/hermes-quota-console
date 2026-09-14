@@ -11,7 +11,7 @@ When Hermes' ``plugins.plugin_storage`` helper is importable we use
 same layout via ``hermes_constants.get_hermes_home()`` so the plugin keeps
 working in standalone test environments.
 
-The on-disk shape is two-layer::
+The on-disk shape is three top-level blocks::
 
     {
       "defaults": {                  # global default layer
@@ -27,13 +27,21 @@ The on-disk shape is two-layer::
           "balance_exhausted_at_zero": true,
           "note": "prod key"
         }
+      },
+      "notifications": {             # browser-side notification opt-in
+        "enabled": false,            # off by default — opt-in
+        "levels": ["critical"],      # which alert levels fire a notification
+        "cooldown_minutes": 60       # per-alert dedupe window
       }
     }
 
 Effective value = provider override if set, else global default, else the
-built-in default (which is ``None`` for every threshold). The module never
-stores credential values, endpoint URLs, or mapping paths — only the
-alert-threshold fields and the per-provider note.
+built-in default (which is ``None`` for every threshold). The notifications
+block lives at the top level on purpose — it does not belong under
+``defaults`` (global) or ``providers`` (per-provider mute is a 1.0.0 item).
+The module never stores credential values, endpoint URLs, mapping paths, or
+notification endpoint tokens — only the alert-threshold fields, the
+per-provider note, and the (browser-controlled) opt-in flags.
 
 Reads are per-request and lock-free; writes use a write-temp-then-os.replace
 pattern under a process-local lock so a concurrent dashboard and gateway
@@ -73,6 +81,31 @@ _BUILTIN_DEFAULTS: dict[str, Any] = {
     "balance_low_amount": None,
     "balance_exhausted_at_zero": None,
     "note": None,
+}
+
+# Notification opt-in block. Stored at the top level (not under ``defaults``
+# or ``providers``) on purpose: it is browser-only state, not an alert
+# threshold, and per-provider mute is a 1.0.0 item. ``levels`` is the alert
+# taxonomy the backend already uses in ``summary.alerts``: ``critical``
+# fires when the red top alert shows, ``low`` fires when the yellow one
+# does. Operators enable only the severity they want — defaults are
+# conservative so the dashboard never spams the operator on page load.
+_NOTIFICATION_LEVELS: frozenset[str] = frozenset({"critical", "low"})
+# Iteration order is explicitly pinned so the on-disk payload and the
+# dialog state stay stable across runs. A frozenset iterates in
+# insertion-hash order which can flip between Python builds; this tuple
+# is the canonical level order.
+_NOTIFICATION_LEVELS_ORDER: tuple[str, ...] = ("critical", "low")
+_NOTIFICATION_LEVELS_DEFAULT: tuple[str, ...] = ("critical",)
+_NOTIFICATION_COOLDOWN_MIN: int = 0
+_NOTIFICATION_COOLDOWN_MAX: int = 24 * 60  # 24h cap keeps the input sane
+_NOTIFICATION_COOLDOWN_DEFAULT: int = 60
+_NOTIFICATIONS_ENABLED_DEFAULT: bool = False
+
+_BUILTIN_NOTIFICATIONS: dict[str, Any] = {
+    "enabled": _NOTIFICATIONS_ENABLED_DEFAULT,
+    "levels": list(_NOTIFICATION_LEVELS_DEFAULT),
+    "cooldown_minutes": _NOTIFICATION_COOLDOWN_DEFAULT,
 }
 
 _WRITE_LOCK = threading.Lock()
@@ -205,16 +238,100 @@ def _normalize_layer(layer: Any, *, layer_name: str) -> dict[str, Any]:
     return cleaned
 
 
-def validate_payload(payload: Any) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+def _normalize_notifications(value: Any) -> dict[str, Any]:
+    """Validate the notifications opt-in block. Fail-closed on unknown keys.
+
+    Each field defaults to its built-in value when missing — operators
+    only state the fields they want to change. ``levels`` is normalised
+    through a set so duplicates collapse and ordering is irrelevant;
+    ``cooldown_minutes`` is clamped into a sane range so the dialog never
+    accidentally disables notifications forever or spams the operator.
+    """
+    cleaned: dict[str, Any] = {}
+    if value is None:
+        return dict(_BUILTIN_NOTIFICATIONS)
+    if not isinstance(value, dict):
+        raise SettingsValidationError(
+            "notifications must be an object", field="notifications"
+        )
+    allowed = {"enabled", "levels", "cooldown_minutes"}
+    extras = set(value) - allowed
+    if extras:
+        raise SettingsValidationError(
+            f"unknown notifications fields: {sorted(extras)}",
+            field="notifications",
+        )
+    # enabled: bool, defaults to False (opt-in).
+    if "enabled" in value:
+        raw = value["enabled"]
+        if not isinstance(raw, bool):
+            raise SettingsValidationError(
+                "notifications.enabled must be a boolean",
+                field="notifications.enabled",
+            )
+        cleaned["enabled"] = raw
+    # levels: subset of {critical, low}, defaults to ["critical"].
+    if "levels" in value:
+        raw = value["levels"]
+        if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+            raise SettingsValidationError(
+                "notifications.levels must be an array of strings",
+                field="notifications.levels",
+            )
+        invalid = sorted({item for item in raw if item not in _NOTIFICATION_LEVELS})
+        if invalid:
+            raise SettingsValidationError(
+                f"notifications.levels contains unknown values: {invalid}",
+                field="notifications.levels",
+            )
+        # Preserve canonical order (critical first, then low) so the
+        # on-disk payload is stable across reads/writes regardless of
+        # the order the dialog sent them.
+        ordered = [level for level in _NOTIFICATION_LEVELS_ORDER if level in raw]
+        if not ordered:
+            raise SettingsValidationError(
+                "notifications.levels must contain at least one value",
+                field="notifications.levels",
+            )
+        cleaned["levels"] = ordered
+    # cooldown_minutes: int >= 0 capped at 24h.
+    if "cooldown_minutes" in value:
+        raw = value["cooldown_minutes"]
+        # bool is a subclass of int; reject it explicitly so True/False
+        # never slip through as 1/0.
+        if isinstance(raw, bool) or not isinstance(raw, int):
+            raise SettingsValidationError(
+                "notifications.cooldown_minutes must be an integer in "
+                f"{_NOTIFICATION_COOLDOWN_MIN}..{_NOTIFICATION_COOLDOWN_MAX}",
+                field="notifications.cooldown_minutes",
+            )
+        if raw < _NOTIFICATION_COOLDOWN_MIN or raw > _NOTIFICATION_COOLDOWN_MAX:
+            raise SettingsValidationError(
+                "notifications.cooldown_minutes must be in "
+                f"{_NOTIFICATION_COOLDOWN_MIN}..{_NOTIFICATION_COOLDOWN_MAX}",
+                field="notifications.cooldown_minutes",
+            )
+        cleaned["cooldown_minutes"] = raw
+    # Merge over the defaults so any field the operator omitted keeps its
+    # built-in value. Done last so partial payloads round-trip cleanly.
+    merged = dict(_BUILTIN_NOTIFICATIONS)
+    merged.update(cleaned)
+    return merged
+
+
+def validate_payload(payload: Any) -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[str, Any]]:
     """Validate a full settings payload and return the cleaned layers.
 
-    Accepts ``{"defaults": {...}, "providers": {...}}``. Unknown top-level
-    keys are rejected, unknown fields inside ``defaults``/``providers`` are
-    rejected, and out-of-range threshold values raise :class:`SettingsValidationError`.
+    Accepts ``{"defaults": {...}, "providers": {...}, "notifications": {...}}``.
+    Unknown top-level keys are rejected, unknown fields inside ``defaults``/
+    ``providers`` are rejected, and out-of-range threshold values raise
+    :class:`SettingsValidationError`. The notifications block defaults are
+    merged in when the operator omits them so partial PUTs round-trip
+    cleanly.
     """
     if not isinstance(payload, dict):
         raise SettingsValidationError("payload must be an object")
-    allowed_top = {"defaults", "providers"}
+    allowed_top = {"defaults", "providers", "notifications"}
     extras = set(payload) - allowed_top
     if extras:
         raise SettingsValidationError(f"unknown top-level keys: {sorted(extras)}")
@@ -231,7 +348,8 @@ def validate_payload(payload: Any) -> tuple[dict[str, Any], dict[str, dict[str, 
         cleaned_providers[provider_id] = _normalize_layer(
             layer, layer_name=f"providers.{provider_id}"
         )
-    return defaults, cleaned_providers
+    notifications = _normalize_notifications(payload.get("notifications"))
+    return defaults, cleaned_providers, notifications
 
 
 # ---------------------------------------------------------------------------
@@ -248,31 +366,47 @@ def _read_disk() -> dict[str, Any]:
     """
     path = storage_path()
     if not path.is_file():
-        return {"defaults": {}, "providers": {}}
+        return {"defaults": {}, "providers": {}, "notifications": {}}
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
         log.warning("settings file could not be read")
-        return {"defaults": {}, "providers": {}}
+        return {"defaults": {}, "providers": {}, "notifications": {}}
     text = text.strip()
     if not text:
-        return {"defaults": {}, "providers": {}}
+        return {"defaults": {}, "providers": {}, "notifications": {}}
     try:
         payload = json.loads(text)
     except ValueError:
         log.warning("settings file is not valid JSON; ignoring until next PUT")
-        return {"defaults": {}, "providers": {}}
+        return {"defaults": {}, "providers": {}, "notifications": {}}
     if not isinstance(payload, dict):
         log.warning("settings file root is not an object; ignoring until next PUT")
-        return {"defaults": {}, "providers": {}}
+        return {"defaults": {}, "providers": {}, "notifications": {}}
     return payload
 
 
+def _safe_notifications(value: Any) -> dict[str, Any]:
+    """Coerce a malformed notifications block into the built-in defaults.
+
+    Read-side counterpart to :func:`_normalize_notifications`. The validator
+    is the contract gate on write; the read path simply replaces any
+    unreadable value with the safe defaults so the dashboard renders
+    correctly without ever crashing on operator-edited JSON.
+    """
+    try:
+        return _normalize_notifications(value)
+    except SettingsValidationError:
+        return dict(_BUILTIN_NOTIFICATIONS)
+
+
 def load_raw() -> dict[str, Any]:
-    """Return the raw disk payload (defaults + providers), unmerged.
+    """Return the raw disk payload (defaults + providers + notifications).
 
     Unknown keys are silently dropped on read so an old format never
-    crashes the dashboard; PUT is the contract gate.
+    crashes the dashboard; PUT is the contract gate. Missing or
+    malformed ``notifications`` blocks fall back to the built-in defaults
+    so the UI can render without an explicit save round-trip.
     """
     raw = _read_disk()
     return {
@@ -282,6 +416,7 @@ def load_raw() -> dict[str, Any]:
             for provider_id, layer in (raw.get("providers") or {}).items()
             if _valid_provider_id(provider_id)
         },
+        "notifications": _safe_notifications(raw.get("notifications")),
     }
 
 
@@ -309,8 +444,12 @@ def save(payload: Any) -> dict[str, Any]:
     touching the file. Successful writes go through a process-local lock and
     a write-temp-then-os.replace pattern so a partial file is never visible.
     """
-    defaults, providers = validate_payload(payload)
-    cleaned = {"defaults": defaults, "providers": providers}
+    defaults, providers, notifications = validate_payload(payload)
+    cleaned = {
+        "defaults": defaults,
+        "providers": providers,
+        "notifications": notifications,
+    }
     path = storage_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     serialized = json.dumps(cleaned, indent=2, sort_keys=True) + "\n"
@@ -386,9 +525,23 @@ def builtin_defaults() -> dict[str, Any]:
     return dict(_BUILTIN_DEFAULTS)
 
 
+def builtin_notifications() -> dict[str, Any]:
+    """Return a copy of the built-in notification opt-in defaults."""
+    return {
+        "enabled": _BUILTIN_NOTIFICATIONS["enabled"],
+        "levels": list(_BUILTIN_NOTIFICATIONS["levels"]),
+        "cooldown_minutes": _BUILTIN_NOTIFICATIONS["cooldown_minutes"],
+    }
+
+
 def known_fields() -> tuple[str, ...]:
     """Return the canonical field list, in declaration order."""
     return _FIELDS
+
+
+def notification_levels() -> tuple[str, ...]:
+    """Return the allowed notification alert levels, in canonical order."""
+    return _NOTIFICATION_LEVELS_ORDER
 
 
 def note_max_length() -> int:
