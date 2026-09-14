@@ -79,6 +79,9 @@ def test_settings_get_returns_defaults_and_effective(isolated_plugin_api):
     body = response.json()
     assert body["defaults"] == {}
     assert body["providers"] == {}
+    # Notifications rides alongside the existing layers so the dialog can
+    # render opt-in controls on first paint.
+    assert body["notifications"] == api._settings.builtin_notifications()
     assert "effective" in body
     assert set(body["fields"]) == {
         "window_low_percent",
@@ -87,6 +90,11 @@ def test_settings_get_returns_defaults_and_effective(isolated_plugin_api):
         "note",
     }
     assert body["schema"]["note_max_length"] == 120
+    # Notification schema mirrors the validator so the dialog can render
+    # the right controls without hardcoding constants.
+    assert body["schema"]["notification_levels"] == ["critical", "low"]
+    assert body["schema"]["notification_cooldown_min"] == 0
+    assert body["schema"]["notification_cooldown_max"] == 24 * 60
     assert body["storage_path"].endswith("config.json")
 
 
@@ -261,3 +269,132 @@ def test_settings_persist_across_module_reload(isolated_plugin_api, tmp_path):
     final = reloaded.load_raw()
     assert final["defaults"]["window_low_percent"] == 20
     assert final["providers"]["deepseek"]["note"] == "prod"
+
+
+# ---------------------------------------------------------------------------
+# Notifications opt-in block on the HTTP surface
+# ---------------------------------------------------------------------------
+
+
+def test_settings_put_persists_notifications_and_returns_them(isolated_plugin_api):
+    api = isolated_plugin_api
+    client = _client(api)
+    response = client.put(
+        "/settings",
+        json={
+            "defaults": {},
+            "providers": {},
+            "notifications": {
+                "enabled": True,
+                "levels": ["critical", "low"],
+                "cooldown_minutes": 15,
+            },
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["notifications"] == {
+        "enabled": True,
+        "levels": ["critical", "low"],
+        "cooldown_minutes": 15,
+    }
+    # Round-trip from disk
+    raw = json.loads(api._settings.storage_path().read_text(encoding="utf-8"))
+    assert raw["notifications"] == body["notifications"]
+
+
+def test_settings_put_rejects_invalid_notifications_block(isolated_plugin_api):
+    api = isolated_plugin_api
+    client = _client(api)
+    # ``cooldown_minutes`` is a string: the validator must reject it and
+    # the file must not be touched.
+    response = client.put(
+        "/settings",
+        json={
+            "defaults": {},
+            "providers": {},
+            "notifications": {"cooldown_minutes": "60"},
+        },
+    )
+    assert response.status_code == 400
+    assert "cooldown_minutes" in response.json()["detail"]
+    assert not api._settings.storage_path().exists()
+
+
+def test_settings_put_rejects_unknown_notification_field(isolated_plugin_api):
+    api = isolated_plugin_api
+    client = _client(api)
+    response = client.put(
+        "/settings",
+        json={
+            "defaults": {},
+            "providers": {},
+            "notifications": {"enabled": True, "extra": "x"},
+        },
+    )
+    assert response.status_code == 400
+    assert "unknown notifications fields" in response.json()["detail"]
+
+
+def test_settings_put_rejects_unknown_notification_level(isolated_plugin_api):
+    api = isolated_plugin_api
+    client = _client(api)
+    response = client.put(
+        "/settings",
+        json={
+            "defaults": {},
+            "providers": {},
+            "notifications": {"levels": ["critical", "bogus"]},
+        },
+    )
+    assert response.status_code == 400
+    assert "unknown values" in response.json()["detail"]
+
+
+def test_settings_put_normalises_notification_level_order(isolated_plugin_api):
+    api = isolated_plugin_api
+    client = _client(api)
+    response = client.put(
+        "/settings",
+        json={
+            "defaults": {},
+            "providers": {},
+            "notifications": {"levels": ["low", "critical"]},
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    # Order is canonical ("critical", "low") regardless of input order.
+    assert body["notifications"]["levels"] == ["critical", "low"]
+
+
+def test_settings_get_reflects_persisted_notifications(isolated_plugin_api):
+    api = isolated_plugin_api
+    api._settings.save({
+        "defaults": {},
+        "providers": {},
+        "notifications": {"enabled": True, "levels": ["low"], "cooldown_minutes": 5},
+    })
+    body = _client(api).get("/settings").json()
+    assert body["notifications"] == {
+        "enabled": True,
+        "levels": ["low"],
+        "cooldown_minutes": 5,
+    }
+
+
+def test_summary_settings_block_carries_notifications(isolated_plugin_api):
+    api = isolated_plugin_api
+    api._settings.save({
+        "defaults": {"window_low_percent": 25},
+        "providers": {"deepseek": {"note": "prod"}},
+        "notifications": {"enabled": True, "levels": ["critical"], "cooldown_minutes": 30},
+    })
+    summary = api._cached_summary()
+    assert summary["settings"]["notifications"] == {
+        "enabled": True,
+        "levels": ["critical"],
+        "cooldown_minutes": 30,
+    }
+    # Schema is also surfaced so the dialog can use it.
+    assert summary["settings"]["schema"]["notification_levels"] == ["critical", "low"]

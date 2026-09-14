@@ -206,6 +206,205 @@ function updateAlertVisible(currentVersion, latestRelease, dismissedTag) {
   return update === dismissedTag ? null : update;
 }
 
+// Canonical notification level ordering and the built-in opt-in defaults.
+// Mirrors dashboard/settings.py on the server side. The frontend never
+// invents new levels; the backend rejects anything outside this list.
+const NOTIFICATION_LEVELS = ["critical", "low"];
+const NOTIFICATION_DEFAULTS = Object.freeze({
+  enabled: false,
+  levels: ["critical"],
+  cooldown_minutes: 60,
+});
+
+// Stable identity for one (level, provider) alert. The frontend uses it
+// as the dedupe key: a notification fires when the alert set changes,
+// i.e. when the identity list grows OR a known identity returns with a
+// strictly higher level ("low" → "critical"). Repeated polls that yield
+// the same set do not re-fire — cooldown applies on top to suppress the
+// case where the operator keeps the page open across long outages.
+function notificationAlertIdentity(summary) {
+  if (!summary || typeof summary !== "object") return [];
+  const alerts = (summary.alerts && typeof summary.alerts === "object") ? summary.alerts : {};
+  const overview = Array.isArray(summary.provider_overview) ? summary.provider_overview : [];
+  const exhausted = Array.isArray(alerts.exhausted) ? alerts.exhausted : [];
+  const low = Array.isArray(alerts.low) ? alerts.low : [];
+  const seen = {};
+  const out = [];
+  function pushFromAlert(level, entry) {
+    if (!entry || typeof entry.provider !== "string" || !entry.provider) return;
+    const seenKey = level + "|" + entry.provider;
+    if (seen[seenKey]) return;
+    seen[seenKey] = true;
+    out.push({ level: level, provider: entry.provider });
+  }
+  exhausted.forEach(function (entry) { pushFromAlert("critical", entry); });
+  low.forEach(function (entry) { pushFromAlert("low", entry); });
+  // Provider availability also drives the red top alert: rate_limited,
+  // degraded, and auth_failed profiles surface as critical even when the
+  // quota layer is green. Forward those as identities so the operator
+  // sees the same "needs attention" cue the top alert renders.
+  overview.forEach(function (bucket) {
+    if (!bucket || typeof bucket !== "object") return;
+    const availability = bucket.provider_availability;
+    const status = availability && typeof availability === "object" ? availability.status : null;
+    if (status === "rate_limited" || status === "degraded" || status === "auth_failed") {
+      const label = String(bucket.label || bucket.id || "");
+      if (label) pushFromAlert("critical", { provider: label });
+    }
+  });
+  // Canonical sort so two equivalent alerts hash the same way regardless
+  // of summary payload order.
+  out.sort(function (a, b) {
+    if (a.level !== b.level) return a.level === "critical" ? -1 : 1;
+    return a.provider.localeCompare(b.provider, undefined, { sensitivity: "base" });
+  });
+  return out;
+}
+
+// Decide whether the dashboard should fire a notification for the
+// current summary, given the previous identity list and the operator's
+// opt-in settings. Pure: same inputs always produce the same output, so
+// the Node test fixtures can drive every branch.
+//
+//   * ``notifications.enabled`` is the master switch — false → [].
+//   * ``notifications.levels`` filters which severity counts. Levels
+//     not on the allowlist are silently dropped.
+//   * Identity comparison uses the sorted (level, provider) tuple. A
+//     new identity, or a strictly higher level for an existing one,
+//     triggers a fire. Equal sets or downgrades (critical → low) never
+//     fire again on the same identity, so the same outage does not
+//     spam the operator.
+//   * ``now`` (epoch ms) and ``cooldownMap`` (identityKey -> lastFiredAt)
+//     implement the per-alert cooldown: when the same identity fires
+//     twice within ``cooldown_minutes`` minutes, the second one is
+//     suppressed. The cooldown is updated for every fired identity so a
+//     refreshing alert keeps respecting the window until it clears.
+function notificationDecisions(
+  summary,
+  previousIdentity,
+  notifications,
+  previousState
+) {
+  const defaults = NOTIFICATION_DEFAULTS;
+  const settings = (notifications && typeof notifications === "object") ? notifications : defaults;
+  const enabled = settings.enabled === true;
+  const allowed = Array.isArray(settings.levels) && settings.levels.length > 0
+    ? settings.levels.filter(function (level) {
+        return NOTIFICATION_LEVELS.indexOf(level) !== -1;
+      })
+    : defaults.levels.slice();
+  const cooldownMinutes = (typeof settings.cooldown_minutes === "number" && settings.cooldown_minutes >= 0)
+    ? settings.cooldown_minutes
+    : defaults.cooldown_minutes;
+  const cooldownMs = cooldownMinutes * 60 * 1000;
+  const identity = notificationAlertIdentity(summary);
+  const prev = Array.isArray(previousIdentity) ? previousIdentity : [];
+  const state = (previousState && typeof previousState === "object") ? previousState : {};
+  const now = (typeof state.now === "number") ? state.now : Date.now();
+  const cooldownMap = (state.cooldownMap && typeof state.cooldownMap === "object") ? state.cooldownMap : {};
+
+  function identityKey(item) { return item.level + "|" + item.provider; }
+  // Dedup uses (level, provider) pairs; downgrade detection uses the
+  // provider alone because the level slot itself flips. Building a
+  // provider map lets us answer "what level did this provider fire at
+  // last time?" without scanning the identity twice.
+  const prevByProvider = {};
+  prev.forEach(function (item) {
+    if (!item || typeof item.provider !== "string") return;
+    prevByProvider[item.provider] = item;
+  });
+
+  const toFire = [];
+  const nextCooldown = Object.assign({}, cooldownMap);
+  if (!enabled) {
+    // Master switch off — wipe the cooldown map so enabling again
+    // immediately surfaces the current state.
+    return {
+      identity: identity,
+      fires: [],
+      cooldownMap: {},
+      allowed: allowed,
+    };
+  }
+  identity.forEach(function (item) {
+    if (allowed.indexOf(item.level) === -1) return;
+    const key = identityKey(item);
+    const previous = prevByProvider[item.provider];
+    const isNew = !previous;
+    // Escalation: critical replaces an existing low at the same provider.
+    // A downgrade (critical → low) is intentionally silent — the
+    // operator already saw the red alert when the outage started; the
+    // calmer "low" tone would be noise. Also silence a "low → critical"
+    // repeat at the same provider when the same critical alert was
+    // observed on the previous poll: the operator already saw it.
+    const escalated = previous && previous.level !== "critical" && item.level === "critical";
+    if (!isNew && !escalated) {
+      // A downgrade at the same provider is never re-fired: the operator
+      // already saw the more severe alert and a calmer tone would only
+      // add noise.
+      if (previous && previous.level === "critical" && item.level === "low") {
+        // Keep the cooldown map untouched so the original critical fire
+        // still gates any future re-fire at this provider.
+        return;
+      }
+      // Same level, same provider — only re-fire if the cooldown
+      // already elapsed (i.e. the previous fire was long enough ago).
+      const lastFired = nextCooldown[key];
+      if (typeof lastFired !== "number" || cooldownMs <= 0 || (now - lastFired) >= cooldownMs) {
+        toFire.push(item);
+        nextCooldown[key] = now;
+      }
+      return;
+    }
+    // Fresh identity or an escalation: respect cooldown the same way so
+    // a brand-new critical alert that lands inside a cooldown window
+    // (e.g. the operator just opened the page during an outage) still
+    // does not re-fire if the same identity fired moments ago.
+    const lastFired = nextCooldown[key];
+    if (typeof lastFired === "number" && cooldownMs > 0 && (now - lastFired) < cooldownMs) {
+      return;
+    }
+    toFire.push(item);
+    nextCooldown[key] = now;
+  });
+  // Stale cooldown entries: identities that are no longer present in the
+  // current snapshot can fire again the next time they appear. Drop
+  // those keys so a returning alert after a clear is not silently
+  // swallowed by a leftover cooldown entry. The reference set is the
+  // CURRENT identity, not the previous one — otherwise the first poll
+  // would always wipe the map before any cooldown can take effect.
+  const currentKeys = {};
+  identity.forEach(function (item) { currentKeys[identityKey(item)] = true; });
+  Object.keys(nextCooldown).forEach(function (key) {
+    if (!currentKeys[key]) delete nextCooldown[key];
+  });
+  return {
+    identity: identity,
+    fires: toFire,
+    cooldownMap: nextCooldown,
+    allowed: allowed,
+  };
+}
+
+// Build the title/body pair the Notification API consumes. Pure, so
+// Node tests assert the copy without a fake DOM.
+function notificationBody(item) {
+  if (!item || typeof item.provider !== "string" || !item.provider) return null;
+  if (item.level === "critical") {
+    return {
+      title: "Provider out of quota",
+      body: item.provider + " needs attention. Open Quota Console for details.",
+    };
+  }
+  if (item.level === "low") {
+    return {
+      title: "Provider running low",
+      body: item.provider + " is running low. Open Quota Console for details.",
+    };
+  }
+  return null;
+}
+
 (function () {
   "use strict";
 
@@ -572,19 +771,288 @@ function updateAlertVisible(currentVersion, latestRelease, dismissedTag) {
     );
   }
 
+  function NotificationsSection(props) {
+    // Operator opt-in for browser notifications. Pure-decision: every
+    // control drives the same ``notificationDraft`` state the Settings
+    // dialog PUTs as a single ``notifications`` block. Permission is
+    // requested on the explicit "Enable" click so the browser never
+    // asks for it on page load.
+    const initial = props.initial || {};
+    const schema = props.schema || {};
+    const levels = Array.isArray(schema.notification_levels) && schema.notification_levels.length > 0
+      ? schema.notification_levels
+      : NOTIFICATION_LEVELS;
+    const cooldownMin = typeof schema.notification_cooldown_min === "number"
+      ? schema.notification_cooldown_min : 0;
+    const cooldownMax = typeof schema.notification_cooldown_max === "number"
+      ? schema.notification_cooldown_max : 24 * 60;
+    const [draft, setDraft] = useState(function () {
+      return {
+        enabled: typeof initial.enabled === "boolean" ? initial.enabled : NOTIFICATION_DEFAULTS.enabled,
+        levels: Array.isArray(initial.levels) && initial.levels.length > 0
+          ? initial.levels.slice()
+          : NOTIFICATION_DEFAULTS.levels.slice(),
+        cooldown_minutes: typeof initial.cooldown_minutes === "number" && initial.cooldown_minutes >= 0
+          ? initial.cooldown_minutes : NOTIFICATION_DEFAULTS.cooldown_minutes,
+      };
+    });
+    const [permission, setPermission] = useState(function () {
+      try {
+        return typeof window.Notification === "function" ? window.Notification.permission : "unsupported";
+      } catch (error) { return "unsupported"; }
+    });
+    const [permissionError, setPermissionError] = useState(null);
+
+    function updateEnabled(next) {
+      setDraft(function (prev) { return Object.assign({}, prev, { enabled: next }); });
+    }
+    function toggleLevel(level) {
+      setDraft(function (prev) {
+        const current = Array.isArray(prev.levels) ? prev.levels : [];
+        const has = current.indexOf(level) !== -1;
+        let nextLevels;
+        if (has) {
+          nextLevels = current.filter(function (item) { return item !== level; });
+          // Keep at least one level so the operator cannot accidentally
+          // silence notifications without flipping the master switch.
+          if (!nextLevels.length) return prev;
+        } else {
+          nextLevels = current.concat([level]);
+        }
+        // Preserve canonical order so the PUT body is stable.
+        nextLevels.sort(function (a, b) {
+          return NOTIFICATION_LEVELS.indexOf(a) - NOTIFICATION_LEVELS.indexOf(b);
+        });
+        return Object.assign({}, prev, { levels: nextLevels });
+      });
+    }
+    function updateCooldown(value) {
+      setDraft(function (prev) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) return prev;
+        const clamped = Math.max(cooldownMin, Math.min(cooldownMax, Math.round(numeric)));
+        return Object.assign({}, prev, { cooldown_minutes: clamped });
+      });
+    }
+    function refreshPermission() {
+      try {
+        if (typeof window.Notification === "function") {
+          setPermission(window.Notification.permission);
+        }
+      } catch (error) { /* sandboxed: leave the previous value */ }
+    }
+    function requestPermission() {
+      // The browser requires a user gesture to surface the permission
+      // prompt; this is the only place we ever call requestPermission.
+      if (typeof window.Notification !== "function") {
+        setPermissionError("Browser notifications are not supported in this browser.");
+        return;
+      }
+      try {
+        const outcome = window.Notification.requestPermission(function (result) {
+          setPermission(result);
+        });
+        if (outcome && typeof outcome.then === "function") {
+          outcome.then(setPermission).catch(function () {
+            setPermissionError("Could not request browser notification permission.");
+          });
+        }
+      } catch (error) {
+        setPermissionError("Could not request browser notification permission.");
+      }
+    }
+    function sendTestNotification() {
+      // Operator-driven sanity check. Reuses the notificationBody helper
+      // so the copy matches what real alerts render with. The notification
+      // is fired regardless of cooldown so the operator can verify the
+      // permission grant on demand.
+      if (typeof window.Notification !== "function") {
+        setPermissionError("Browser notifications are not supported in this browser.");
+        return;
+      }
+      if (window.Notification.permission !== "granted") {
+        setPermissionError("Enable browser notifications first to send a test.");
+        return;
+      }
+      try {
+        const test = new window.Notification("Quota Console notifications enabled", {
+          body: "You will see alerts here when the levels you selected fire.",
+          tag: "quota-console-test",
+        });
+        if (test && typeof test.addEventListener === "function") {
+          test.addEventListener("click", function () {
+            try {
+              if (typeof window.focus === "function") window.focus();
+              window.location.assign("/quota-console");
+            } catch (error) { /* navigation is best-effort */ }
+          });
+        }
+      } catch (error) {
+        setPermissionError("Could not send a test notification.");
+      }
+    }
+
+    // Push draft up so the dialog body picks it up in the next PUT.
+    // The save() handler below serialises ``props.draft`` — we copy ours
+    // back into this.draft through props.onChange.
+    useEffect(function () {
+      if (typeof props.onChange === "function") {
+        props.onChange(draft);
+      }
+    }, [draft.enabled, draft.levels.join(","), draft.cooldown_minutes]);
+
+    const permissionLabel = permission === "granted"
+      ? "Permission granted"
+      : permission === "denied"
+        ? "Permission denied"
+        : permission === "unsupported"
+          ? "Not supported in this browser"
+          : "Permission not requested";
+    const permissionClass = "usages-notifications-permission usages-notifications-permission--"
+      + permission.replace(/[^a-z0-9_-]/g, "unknown");
+
+    return h(
+      "section",
+      { className: "usages-settings-section usages-settings-notifications" },
+      h(
+        "header",
+        { className: "usages-settings-notifications-header" },
+        h("h3", { className: "usages-settings-section-title" }, "Notifications"),
+        h("span", { className: permissionClass }, permissionLabel),
+      ),
+      h(
+        "p",
+        { className: "usages-settings-field-hint" },
+        "Browser notifications are off until you turn them on. ",
+        "They only fire while this dashboard tab is open or in the background — ",
+        "closed tabs are out of scope for this version.",
+      ),
+      h(
+        "label",
+        { className: "usages-settings-notifications-toggle" },
+        h("input", {
+          type: "checkbox",
+          checked: Boolean(draft.enabled),
+          onChange: function (event) { updateEnabled(Boolean(event.target.checked)); },
+          "aria-describedby": "usages-notifications-description",
+        }),
+        h("span", null, "Enable browser notifications"),
+      ),
+      h(
+        "fieldset",
+        {
+          className: "usages-settings-notifications-levels",
+          disabled: !draft.enabled,
+          "aria-label": "Alert levels that fire a notification",
+        },
+        h("legend", { className: "usages-settings-field-hint" }, "Fire a notification for:"),
+        levels.map(function (level) {
+          const checked = draft.levels.indexOf(level) !== -1;
+          return h(
+            "label",
+            { key: level, className: "usages-settings-notifications-level" },
+            h("input", {
+              type: "checkbox",
+              checked: checked,
+              onChange: function () { toggleLevel(level); },
+            }),
+            h(
+              "span",
+              null,
+              level === "critical" ? "Critical (out of quota, rate-limited, auth failed)" : "Low (running low)",
+            ),
+          );
+        }),
+      ),
+      h(
+        "div",
+        { className: "usages-settings-notifications-cooldown" },
+        h(
+          "label",
+          { htmlFor: "usages-notifications-cooldown-input" },
+          "Cooldown between repeats (minutes)",
+        ),
+        h("input", {
+          id: "usages-notifications-cooldown-input",
+          type: "number",
+          min: cooldownMin,
+          max: cooldownMax,
+          step: 1,
+          value: draft.cooldown_minutes,
+          onChange: function (event) { updateCooldown(event.target.value); },
+          disabled: !draft.enabled,
+          "aria-describedby": "usages-notifications-description",
+        }),
+      ),
+      h(
+        "div",
+        { className: "usages-settings-notifications-actions" },
+        permission === "granted"
+          ? h(
+              Button,
+              {
+                type: "button",
+                size: "sm",
+                onClick: sendTestNotification,
+              },
+              "Send test notification",
+            )
+          : permission === "denied" || permission === "unsupported"
+            ? h(
+                Button,
+                { type: "button", size: "sm", disabled: true },
+                "Browser blocks notifications",
+              )
+            : h(
+                Button,
+                {
+                  type: "button",
+                  size: "sm",
+                  onClick: requestPermission,
+                },
+                "Enable browser notifications",
+              ),
+        h(
+          Button,
+          { type: "button", size: "sm", variant: "ghost", onClick: refreshPermission },
+          "Refresh status",
+        ),
+      ),
+      permissionError
+        ? h("p", { className: "usages-settings-error", role: "alert" }, permissionError)
+        : null,
+      h(
+        "p",
+        { id: "usages-notifications-description", className: "usages-settings-notifications-note" },
+        "Notifications follow the existing alert set: a new alert fires once, repeats are deduped per provider and level, and the cooldown suppresses back-to-back duplicates while the page stays open.",
+      ),
+    );
+  }
+
   function SettingsDialog(props) {
     // Operator-editable settings dialog. Renders the global defaults layer
     // first and then one expandable card per provider so operators can set
-    // per-provider overrides without losing the global baseline. The dialog
-    // keeps a local draft of the layers and only PUTs on Save.
+    // per-provider overrides without losing the global baseline. The
+    // dialog keeps a local draft of the layers and only PUTs on Save.
     const initial = props.initial || { defaults: {}, providers: {} };
     const schema = props.schema || { note_max_length: 120 };
     const providers = Array.isArray(props.providers) ? props.providers : [];
+    const initialNotifications = props.notifications || NOTIFICATION_DEFAULTS;
     const [draftDefaults, setDraftDefaults] = useState(function () {
       return Object.assign({}, initial.defaults || {});
     });
     const [draftProviders, setDraftProviders] = useState(function () {
       return Object.assign({}, initial.providers || {});
+    });
+    const [draftNotifications, setDraftNotifications] = useState(function () {
+      return {
+        enabled: typeof initialNotifications.enabled === "boolean"
+          ? initialNotifications.enabled : NOTIFICATION_DEFAULTS.enabled,
+        levels: Array.isArray(initialNotifications.levels) && initialNotifications.levels.length > 0
+          ? initialNotifications.levels.slice() : NOTIFICATION_DEFAULTS.levels.slice(),
+        cooldown_minutes: typeof initialNotifications.cooldown_minutes === "number"
+          ? initialNotifications.cooldown_minutes : NOTIFICATION_DEFAULTS.cooldown_minutes,
+      };
     });
     // A provider section opens on mount when it already carries overrides
     // in the loaded settings. The value is captured once and never driven
@@ -636,6 +1104,14 @@ function updateAlertVisible(currentVersion, latestRelease, dismissedTag) {
     function resetDraft() {
       setDraftDefaults(Object.assign({}, initial.defaults || {}));
       setDraftProviders(Object.assign({}, initial.providers || {}));
+      setDraftNotifications({
+        enabled: typeof initialNotifications.enabled === "boolean"
+          ? initialNotifications.enabled : NOTIFICATION_DEFAULTS.enabled,
+        levels: Array.isArray(initialNotifications.levels) && initialNotifications.levels.length > 0
+          ? initialNotifications.levels.slice() : NOTIFICATION_DEFAULTS.levels.slice(),
+        cooldown_minutes: typeof initialNotifications.cooldown_minutes === "number"
+          ? initialNotifications.cooldown_minutes : NOTIFICATION_DEFAULTS.cooldown_minutes,
+      });
       setError(null);
     }
 
@@ -645,7 +1121,11 @@ function updateAlertVisible(currentVersion, latestRelease, dismissedTag) {
       SDK.fetchJSON(SETTINGS_API, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ defaults: draftDefaults, providers: draftProviders }),
+        body: JSON.stringify({
+          defaults: draftDefaults,
+          providers: draftProviders,
+          notifications: draftNotifications,
+        }),
       })
         .then(function (result) {
           setSaving(false);
@@ -768,6 +1248,14 @@ function updateAlertVisible(currentVersion, latestRelease, dismissedTag) {
         ),
         error ? h("p", { className: "usages-settings-error", role: "alert" }, error) : null,
         h(
+          NotificationsSection,
+          {
+            initial: draftNotifications,
+            schema: schema,
+            onChange: setDraftNotifications,
+          },
+        ),
+        h(
           "div",
           { className: "usages-settings-footer" },
           h(
@@ -796,11 +1284,72 @@ function updateAlertVisible(currentVersion, latestRelease, dismissedTag) {
     );
   }
 
+  function maybeFireNotifications(prev, summary, notifications) {
+    // Browser-side firing logic. Lives at module scope (well, here inside
+    // the SDK-aware IIFE) so we can reach ``window.Notification`` while
+    // keeping the decision functions themselves pure. The pure pieces
+    // (``notificationAlertIdentity``, ``notificationDecisions``,
+    // ``notificationBody``) are exported for Node tests; this wrapper
+    // binds them to the browser API and to a useRef-tracked cooldown map.
+    if (!summary || typeof summary !== "object") return { identity: [], cooldownMap: prev.cooldownMap || {} };
+    if (!notifications || typeof notifications !== "object") return { identity: [], cooldownMap: prev.cooldownMap || {} };
+    const decision = notificationDecisions(
+      summary,
+      prev.identity || [],
+      notifications,
+      { cooldownMap: prev.cooldownMap || {}, now: Date.now() },
+    );
+    if (Array.isArray(decision.fires) && decision.fires.length > 0
+        && typeof window.Notification === "function"
+        && window.Notification.permission === "granted") {
+      decision.fires.forEach(function (item) {
+        const built = notificationBody(item);
+        if (!built) return;
+        try {
+          const note = new window.Notification(built.title, {
+            body: built.body,
+            tag: "quota-console-" + item.level + "-" + item.provider,
+          });
+          if (note && typeof note.addEventListener === "function") {
+            note.addEventListener("click", function () {
+              try {
+                if (typeof window.focus === "function") window.focus();
+                window.location.assign("/quota-console");
+              } catch (error) { /* navigation is best-effort */ }
+            });
+          }
+        } catch (error) {
+          // Some browsers throw on duplicate tags inside the cooldown
+          // window; swallow the failure and keep the cooldown map intact
+          // so the operator does not see duplicate toasts back-to-back.
+        }
+      });
+    }
+    return { identity: decision.identity, cooldownMap: decision.cooldownMap };
+  }
+
   function UsagePage() {
     const [state, setState] = useState({ loading: true, data: null, error: false });
     const [resetting, setResetting] = useState(null);
     const [actionMessage, setActionMessage] = useState(null);
     const [showSettings, setShowSettings] = useState(false);
+    // Browser-notification opt-in state. Mirrored from the server-side
+    // settings block on first summary, then kept in lockstep so the
+    // firing logic uses the operator's most recent choice even before
+    // the next PUT round-trip lands.
+    const [notifications, setNotifications] = useState(function () {
+      return {
+        identity: [],
+        cooldownMap: {},
+        settings: Object.assign({}, NOTIFICATION_DEFAULTS),
+      };
+    });
+    // Ref mirror so the 60s poll always reads the latest opt-in without
+    // rebuilding the timer every time the operator flips a checkbox in
+    // the settings dialog. Stale-state capture inside useCallback is the
+    // classic React foot-gun; the ref keeps the load() closure fresh.
+    const notificationsRef = useRef(notifications);
+    notificationsRef.current = notifications;
     const [hiddenProviders, setHiddenProviders] = useState(function () {
       try {
         const raw = window.localStorage.getItem("quota-console-hidden-providers");
@@ -873,6 +1422,32 @@ function updateAlertVisible(currentVersion, latestRelease, dismissedTag) {
         .then(function (data) {
           if (!mounted.current) return data;
           setState({ loading: false, data: data, error: false });
+          // Fire-and-forget the notification check. Pure-decision
+          // functions drive the call; the wrapper inside the IIFE
+          // reaches ``window.Notification`` to render the toast. The
+          // resulting {identity, cooldownMap} lands back in state so the
+          // next poll's diff only includes new alerts.
+          if (data) {
+            const current = notificationsRef.current;
+            const next = maybeFireNotifications(
+              current,
+              data,
+              data.settings && data.settings.notifications,
+            );
+            const incomingSettings = (data.settings && data.settings.notifications) || current.settings;
+            const settingsChanged = JSON.stringify(incomingSettings) !== JSON.stringify(current.settings);
+            const stateChanged = next && (next.identity !== current.identity
+                || next.cooldownMap !== current.cooldownMap);
+            if (stateChanged || settingsChanged) {
+              setNotifications(function () {
+                return {
+                  identity: next ? next.identity : current.identity,
+                  cooldownMap: next ? next.cooldownMap : current.cooldownMap,
+                  settings: incomingSettings,
+                };
+              });
+            }
+          }
           return data;
         })
         .catch(function (error) {
@@ -1177,6 +1752,7 @@ function updateAlertVisible(currentVersion, latestRelease, dismissedTag) {
               defaults: (data.settings && data.settings.defaults) || {},
               providers: (data.settings && data.settings.providers) || {},
             },
+            notifications: (data.settings && data.settings.notifications) || null,
             schema: (data.settings && data.settings.schema) || { note_max_length: 120 },
             providers: (function () {
               // Settings list mirrors the main-screen visibility rules:
@@ -1626,5 +2202,8 @@ if (typeof module !== "undefined" && module && module.exports) {
     moveProviderId: moveProviderId,
     bannerAlertFromSummary: bannerAlertFromSummary,
     releaseUpdate: releaseUpdate,
+    notificationAlertIdentity: notificationAlertIdentity,
+    notificationDecisions: notificationDecisions,
+    notificationBody: notificationBody,
   };
 }

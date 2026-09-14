@@ -888,10 +888,14 @@ def _build_summary() -> dict[str, Any]:
         "settings": {
             "defaults": raw.get("defaults", {}),
             "providers": raw.get("providers", {}),
+            "notifications": raw.get("notifications", _settings.builtin_notifications()),
             "effective": effective,
             "fields": list(_settings.known_fields()),
             "schema": {
                 "note_max_length": _settings.note_max_length(),
+                "notification_levels": list(_settings.notification_levels()),
+                "notification_cooldown_min": 0,
+                "notification_cooldown_max": 24 * 60,
             },
             "storage_path": str(_settings.storage_path()),
         },
@@ -978,11 +982,13 @@ async def reset_rate_limits(
 async def get_settings() -> dict[str, Any]:
     """Return the operator-editable settings for this plugin.
 
-    The response carries the raw on-disk layers (``defaults`` and
-    ``providers``), the merged effective view per provider, the canonical
-    field list, and the on-disk path so the UI can show the source of
-    truth. Credentials and storage paths for credential material are never
-    included — only the operator fields.
+    The response carries the raw on-disk layers (``defaults``,
+    ``providers``, and ``notifications``), the merged effective view per
+    provider, the canonical field list, and the on-disk path so the UI
+    can show the source of truth. Credentials and storage paths for
+    credential material are never included — only the operator fields.
+    The ``notifications`` block rides alongside so the dashboard can
+    render the opt-in controls on first paint without an extra request.
     """
     raw = _settings.load_raw()
     specs = _current_providers()
@@ -994,9 +1000,15 @@ async def get_settings() -> dict[str, Any]:
     return {
         "defaults": raw.get("defaults", {}),
         "providers": raw.get("providers", {}),
+        "notifications": raw.get("notifications", _settings.builtin_notifications()),
         "effective": effective,
         "fields": list(_settings.known_fields()),
-        "schema": {"note_max_length": _settings.note_max_length()},
+        "schema": {
+            "note_max_length": _settings.note_max_length(),
+            "notification_levels": list(_settings.notification_levels()),
+            "notification_cooldown_min": 0,
+            "notification_cooldown_max": 24 * 60,
+        },
         "storage_path": str(_settings.storage_path()),
     }
 
@@ -1007,9 +1019,13 @@ async def put_settings(request: Request, payload: dict[str, Any]) -> dict[str, A
 
     Unknown top-level keys, unknown field names, out-of-range thresholds,
     multi-line notes, and notes longer than 120 characters are rejected with
-    HTTP 400. The storage file is rewritten atomically (write-temp +
-    os.replace under a process-local lock) and the summary cache is
-    invalidated so the next read returns the new effective view.
+    HTTP 400. The ``notifications`` block is validated through the same
+    fail-closed pipeline: unknown fields, non-boolean ``enabled``,
+    non-array ``levels``, unknown level names, empty levels, and
+    ``cooldown_minutes`` out of ``[0, 1440]`` all return HTTP 400. The
+    storage file is rewritten atomically (write-temp + os.replace under a
+    process-local lock) and the summary cache is invalidated so the next
+    read returns the new effective view.
     """
     origin = request.headers.get("origin")
     if origin:
@@ -1043,8 +1059,14 @@ async def put_settings(request: Request, payload: dict[str, Any]) -> dict[str, A
     return {
         "defaults": cleaned.get("defaults", {}),
         "providers": cleaned.get("providers", {}),
+        "notifications": cleaned.get("notifications", _settings.builtin_notifications()),
         "effective": effective,
         "fields": list(_settings.known_fields()),
-        "schema": {"note_max_length": _settings.note_max_length()},
+        "schema": {
+            "note_max_length": _settings.note_max_length(),
+            "notification_levels": list(_settings.notification_levels()),
+            "notification_cooldown_min": 0,
+            "notification_cooldown_max": 24 * 60,
+        },
         "storage_path": str(_settings.storage_path()),
     }

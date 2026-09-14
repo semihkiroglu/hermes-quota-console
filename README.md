@@ -24,6 +24,11 @@ tab.
   alerts. Thresholds are off by default
 - **Card layout customization** — hide, show, and drag-to-reorder cards in
   Customize mode; preferences are stored in the browser
+- **Browser notifications (opt-in)** — receive a native browser
+  notification when a critical (out of quota / rate-limited / auth
+  failed) or low (running low) alert lands while the dashboard tab is
+  open or in the background. Per-alert cooldown, dedupe, and a
+  permission gate; off by default
 - **Row-level reset** — the button shown when Hermes blocks usage
   (rate-limited/degraded) lifts the block so you can continue; it never
   touches credentials
@@ -84,11 +89,24 @@ Then restart the Hermes dashboard process. The `/quota-console` route and
   low/exhausted quota, a Hermes usage block (rate-limited/degraded), or an
   auth failure. It polls the same 30s-cached summary every 60s and links into
   this page. Transient "unavailable" fetch failures never raise the strip.
-- **Version**: the footer shows the plugin version (`v0.1.5`) read from
+- **Version**: the footer shows the plugin version (`v0.2.0`) read from
   `pyproject.toml`, matching the GitHub release tag.
 - **Settings**: alert thresholds are configured in two layers — global
   defaults first, then per-provider overrides. No alerts fire until a
-  threshold is set.
+  threshold is set. The bottom of the Settings dialog adds a
+  "Notifications" opt-in block: master toggle, alert levels
+  (`critical` / `low`), cooldown in minutes, and a permission gate that
+  only asks for the browser permission when you click "Enable browser
+  notifications".
+- **Notifications**: configured in Settings and rendered with the
+  browser's `Notification` API while the dashboard tab is open or
+  in the background. The check piggy-backs on the 60-second summary
+  poll: a new alert (a critical exhaustion, a provider rate-limited by
+  Hermes, an auth failure, etc.) fires a notification the first time it
+  shows up; repeats on the same identity are deduped by the per-alert
+  cooldown. **Tab-closed delivery is not supported in this version.**
+  Closing the tab silences notifications; alerts still surface inside
+  the dashboard on the next visit.
 - **Customize**: hide/show cards and drag-to-reorder mode. Hidden cards show
   as compact rows in this mode only and return with one click.
 - **Reset**: "Reset usage" on a profile row appears only when Hermes blocked
