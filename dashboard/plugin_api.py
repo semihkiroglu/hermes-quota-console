@@ -1021,8 +1021,8 @@ async def put_settings(request: Request, payload: dict[str, Any]) -> dict[str, A
     multi-line notes, and notes longer than 120 characters are rejected with
     HTTP 400. The ``notifications`` block is validated through the same
     fail-closed pipeline: unknown fields, non-boolean ``enabled``,
-    non-boolean ``reminder_enabled``, non-array ``levels``, unknown level
-    names, empty levels, and ``reminder_minutes`` outside ``[5, 1440]``
+    non-array ``levels``, unknown level
+    names, empty levels, and ``reminder_minutes`` outside ``[0, 1440]``
     all return HTTP 400. The storage file is rewritten atomically
     (write-temp + os.replace under a process-local lock) and the summary
     cache is invalidated so the next read returns the new effective view.

@@ -230,13 +230,10 @@ const NOTIFICATION_LEVELS = ["critical", "low"];
 const NOTIFICATION_DEFAULTS = Object.freeze({
   enabled: false,
   levels: ["critical"],
-  // Repeat-reminder master switch. Default OFF — a new alert notifies
-  // once and never repeats while it stays active. Operators opt into
-  // repeat reminders explicitly.
-  reminder_enabled: false,
   // Gap between repeat notifications on the same still-active alert.
-  // Only meaningful while reminder_enabled is on.
-  reminder_minutes: 60,
+  // Zero switches repeats off: a new alert notifies once and never
+  // repeats while it stays active.
+  reminder_minutes: 0,
 });
 
 // Stable identity for one (level, provider) alert. The frontend uses it
@@ -297,7 +294,7 @@ function notificationAlertIdentity(summary) {
 //     triggers a fire. Equal sets or downgrades (critical → low) never
 //     fire again on the same identity, so the same outage does not
 //     spam the operator.
-//   * Repeat reminders are gated by ``notifications.reminder_enabled``.
+//   * Repeat reminders are gated by ``notifications.reminder_minutes``.
 //     When OFF (default) an alert fires exactly once; the cooldown map
 //     is still seeded for the active identity but never consulted again
 //     until the alert leaves the snapshot. When ON, a still-active
@@ -321,13 +318,11 @@ function notificationDecisions(
         return NOTIFICATION_LEVELS.indexOf(level) !== -1;
       })
     : defaults.levels.slice();
-  // Repeat-reminder knobs. ``reminder_enabled`` defaults to OFF so a
-  // brand-new alert notifies once and nothing repeats; setting it to
-  // true lets ``reminder_minutes`` (clamped into 5..1440) gate repeats.
-  const reminderEnabled = settings.reminder_enabled === true;
-  const reminderMinutes = (typeof settings.reminder_minutes === "number" && settings.reminder_minutes >= 5)
+  // Repeat-reminder cadence: zero means the alert notifies once and never
+  // repeats, anything above zero (clamped into 0..1440) gates the repeats.
+  const reminderMinutes = (typeof settings.reminder_minutes === "number" && settings.reminder_minutes >= 0)
     ? settings.reminder_minutes
-    : defaults.reminder_minutes;
+    : NOTIFICATION_DEFAULTS.reminder_minutes;
   const cooldownMs = reminderMinutes * 60 * 1000;
   const identity = notificationAlertIdentity(summary);
   const prev = Array.isArray(previousIdentity) ? previousIdentity : [];
@@ -379,12 +374,12 @@ function notificationDecisions(
         // still gates any future re-fire at this provider.
         return;
       }
-      // Same level, same provider — only re-fire if repeat reminders are
-      // enabled AND the previous fire was long enough ago. With the
-      // default OFF switch, an already-notified alert is silent until it
-      // leaves the snapshot and returns.
+      // Same level, same provider — only re-fire when a reminder interval
+      // is set AND the previous fire was long enough ago. At the default
+      // of zero an already-notified alert stays silent until it leaves the
+      // snapshot and returns.
       const lastFired = nextCooldown[key];
-      if (!reminderEnabled) return;
+      if (cooldownMs <= 0) return;
       if (typeof lastFired !== "number" || cooldownMs <= 0 || (now - lastFired) >= cooldownMs) {
         toFire.push(item);
         nextCooldown[key] = now;
@@ -446,11 +441,10 @@ function focusQuotaConsoleOnClick() {
 // state (master toggle AND the reminder switch) so the row reads "Off"
 // whenever no reminder would fire. Pure: the Node fixtures assert the
 // formatting without a DOM.
-function reminderSuffix(minutes, enabled) {
-  if (!enabled) return "Off";
+function reminderSuffix(minutes) {
   const total = Number(minutes);
-  if (!Number.isFinite(total) || total <= 0) return "Off";
-  return "On";
+  if (!Number.isFinite(total) || total < 0) return "Invalid";
+  return total === 0 ? "Off" : "On";
 }
 
 // Build the title/body pair the Notification API consumes. Pure, so
@@ -873,8 +867,6 @@ function notificationBody(item) {
         levels: Array.isArray(initial.levels) && initial.levels.length > 0
           ? initial.levels.slice()
           : NOTIFICATION_DEFAULTS.levels.slice(),
-        reminder_enabled: typeof initial.reminder_enabled === "boolean"
-          ? initial.reminder_enabled : NOTIFICATION_DEFAULTS.reminder_enabled,
         reminder_minutes: typeof initial.reminder_minutes === "number" && initial.reminder_minutes >= reminderMin
           ? initial.reminder_minutes : NOTIFICATION_DEFAULTS.reminder_minutes,
       };
@@ -909,14 +901,13 @@ function notificationBody(item) {
         return Object.assign({}, prev, { levels: nextLevels });
       });
     }
-    function toggleReminderEnabled(next) {
-      setDraft(function (prev) { return Object.assign({}, prev, { reminder_enabled: Boolean(next) }); });
-    }
     function updateReminderMinutes(value) {
       setDraft(function (prev) {
         const numeric = Number(value);
-        if (!Number.isFinite(numeric)) return prev;
-        const clamped = Math.max(reminderMin, Math.min(reminderMax, Math.round(numeric)));
+        // Zero is the off switch; a negative or non-numeric entry fails
+        // closed and the draft keeps its previous value.
+        if (!Number.isFinite(numeric) || numeric < 0) return prev;
+        const clamped = Math.min(reminderMax, Math.round(numeric));
         return Object.assign({}, prev, { reminder_minutes: clamped });
       });
     }
@@ -984,7 +975,7 @@ function notificationBody(item) {
       if (typeof props.onChange === "function") {
         props.onChange(draft);
       }
-    }, [draft.enabled, draft.levels.join(","), draft.reminder_enabled, draft.reminder_minutes]);
+    }, [draft.enabled, draft.levels.join(","), draft.reminder_minutes]);
     // Window focus / tab visibility also re-read the permission so the
     // pill stays accurate when the operator toggles site permissions in
     // a different tab and returns to the dashboard.
@@ -1017,13 +1008,18 @@ function notificationBody(item) {
       + permission.replace(/[^a-z0-9_-]/g, "unknown");
 
     return h(
-      "section",
-      { className: "usages-settings-section usages-settings-notifications" },
+      "details",
+      { className: "usages-settings-section usages-settings-notifications usages-settings-collapsible" },
       h(
-        "header",
-        { className: "usages-settings-notifications-header" },
-        h("h3", { className: "usages-settings-section-title" }, "Notifications"),
-        h("span", { className: permissionClass }, permissionLabel),
+        "summary",
+        { className: "usages-settings-section-summary" },
+        h(
+          "header",
+          { className: "usages-settings-notifications-header" },
+          h("h3", { className: "usages-settings-section-title" }, "Notifications"),
+          h("span", { className: permissionClass }, permissionLabel),
+        ),
+        h("span", { className: "usages-settings-chevron", "aria-hidden": "true" }, "\u25be"),
       ),
       h(
         "p",
@@ -1076,15 +1072,9 @@ function notificationBody(item) {
           "div",
           { className: "usages-settings-field-label" },
           h(
-            "label",
-            { className: "usages-settings-notifications-reminder-toggle" },
-            h("input", {
-              type: "checkbox",
-              checked: Boolean(draft.reminder_enabled),
-              onChange: function (event) { toggleReminderEnabled(Boolean(event.target.checked)); },
-              "aria-describedby": "usages-notifications-description",
-            }),
-            h("span", null, "Remind me again"),
+            "span",
+            { className: "usages-settings-notifications-reminder-title" },
+            "Remind me again",
           ),
           // The copy rides inside the row, under its label, exactly the way
           // every Global-defaults row carries its own description.
@@ -1094,7 +1084,7 @@ function notificationBody(item) {
               id: "usages-notifications-description",
               className: "usages-settings-field-hint usages-settings-notifications-reminder-note",
             },
-            "Notifications follow the existing alert set: a new alert fires once, repeats are off by default \u2014 turn on \u201cRemind me again\u201d to receive a reminder after the minutes you set.",
+            "Repeat a still-active alert after this many minutes; zero switches repeats off.",
           ),
         ),
         h(
@@ -1108,17 +1098,14 @@ function notificationBody(item) {
             step: 1,
             value: draft.reminder_minutes,
             onChange: function (event) { updateReminderMinutes(event.target.value); },
-            disabled: !draft.enabled || !draft.reminder_enabled,
+            disabled: !draft.enabled,
             "aria-label": "Remind me again after (minutes)",
             "aria-describedby": "usages-notifications-description",
           }),
           h(
             "span",
             { className: "usages-settings-notifications-reminder-suffix" },
-            reminderSuffix(
-              draft.reminder_minutes,
-              Boolean(draft.enabled) && Boolean(draft.reminder_enabled),
-            ),
+            reminderSuffix(draft.reminder_minutes),
           ),
         ),
       ),
@@ -1179,9 +1166,7 @@ function notificationBody(item) {
           ? initial.enabled : NOTIFICATION_DEFAULTS.enabled,
         levels: Array.isArray(initial.levels) && initial.levels.length > 0
           ? initial.levels.slice() : NOTIFICATION_DEFAULTS.levels.slice(),
-        reminder_enabled: typeof initial.reminder_enabled === "boolean"
-          ? initial.reminder_enabled : NOTIFICATION_DEFAULTS.reminder_enabled,
-        reminder_minutes: typeof initial.reminder_minutes === "number" && initial.reminder_minutes >= 5
+        reminder_minutes: typeof initial.reminder_minutes === "number" && initial.reminder_minutes >= 0
           ? initial.reminder_minutes : NOTIFICATION_DEFAULTS.reminder_minutes,
       };
     });
@@ -1241,9 +1226,7 @@ function notificationBody(item) {
           ? initial.enabled : NOTIFICATION_DEFAULTS.enabled,
         levels: Array.isArray(initial.levels) && initial.levels.length > 0
           ? initial.levels.slice() : NOTIFICATION_DEFAULTS.levels.slice(),
-        reminder_enabled: typeof initial.reminder_enabled === "boolean"
-          ? initial.reminder_enabled : NOTIFICATION_DEFAULTS.reminder_enabled,
-        reminder_minutes: typeof initial.reminder_minutes === "number" && initial.reminder_minutes >= 5
+        reminder_minutes: typeof initial.reminder_minutes === "number" && initial.reminder_minutes >= 0
           ? initial.reminder_minutes : NOTIFICATION_DEFAULTS.reminder_minutes,
       });
       setError(null);
@@ -1301,7 +1284,7 @@ function notificationBody(item) {
         ),
         h(
           "details",
-          { className: "usages-settings-section usages-settings-collapsible", open: true },
+          { className: "usages-settings-section usages-settings-collapsible" },
           h(
             "summary",
             { className: "usages-settings-section-summary" },
@@ -1341,7 +1324,7 @@ function notificationBody(item) {
         ),
         h(
           "details",
-          { className: "usages-settings-section usages-settings-collapsible", open: true },
+          { className: "usages-settings-section usages-settings-collapsible" },
           h(
             "summary",
             { className: "usages-settings-section-summary" },

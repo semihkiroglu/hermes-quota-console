@@ -102,12 +102,10 @@ def _body(item):
     return json.loads(_node_call(script))
 
 
-def _suffix(minutes, enabled):
-    payload = json.dumps({"minutes": minutes, "enabled": enabled})
+def _suffix(minutes):
     script = (
         _bundle_loader()
-        + "const input = JSON.parse(%r);\n" % payload
-        + "process.stdout.write(JSON.stringify(m.exports.reminderSuffix(input.minutes, input.enabled)));"
+        + "process.stdout.write(JSON.stringify(m.exports.reminderSuffix(%s)));" % json.dumps(minutes)
     )
     return json.loads(_node_call(script))
 
@@ -229,7 +227,7 @@ def test_decisions_return_empty_when_disabled():
         "alerts": {"exhausted": [{"provider": "DeepSeek"}], "low": []},
         "provider_overview": [],
     }
-    out = _decisions(summary, [], {"enabled": False, "levels": ["critical"], "reminder_enabled": True, "reminder_minutes": 60}, {})
+    out = _decisions(summary, [], {"enabled": False, "levels": ["critical"], "reminder_minutes": 60}, {})
     assert out["fires"] == []
     # Master switch off — the cooldown map is wiped so enabling again
     # immediately surfaces the current state.
@@ -253,7 +251,7 @@ def test_decisions_fire_a_new_identity_on_first_poll():
         "alerts": {"exhausted": [{"provider": "DeepSeek"}], "low": []},
         "provider_overview": [],
     }
-    settings = {"enabled": True, "levels": ["critical"], "reminder_enabled": True, "reminder_minutes": 60}
+    settings = {"enabled": True, "levels": ["critical"], "reminder_minutes": 60}
     out = _decisions(summary, [], settings, {"now": 1000, "cooldownMap": {}})
     assert out["fires"] == [{"level": "critical", "provider": "DeepSeek"}]
     assert out["cooldownMap"]["critical|DeepSeek"] == 1000
@@ -264,7 +262,7 @@ def test_decisions_skip_when_level_not_in_allowlist():
         "alerts": {"exhausted": [{"provider": "DeepSeek"}], "low": []},
         "provider_overview": [],
     }
-    settings = {"enabled": True, "levels": ["low"], "reminder_enabled": True, "reminder_minutes": 60}
+    settings = {"enabled": True, "levels": ["low"], "reminder_minutes": 60}
     out = _decisions(summary, [], settings, {"now": 1000, "cooldownMap": {}})
     assert out["fires"] == []
 
@@ -274,7 +272,7 @@ def test_decisions_respect_cooldown_within_window():
         "alerts": {"exhausted": [{"provider": "DeepSeek"}], "low": []},
         "provider_overview": [],
     }
-    settings = {"enabled": True, "levels": ["critical"], "reminder_enabled": True, "reminder_minutes": 60}
+    settings = {"enabled": True, "levels": ["critical"], "reminder_minutes": 60}
     # First poll fires and seeds the cooldown map.
     first = _decisions(summary, [], settings, {"now": 1000, "cooldownMap": {}})
     # Second poll arrives 30 seconds later — still inside the 60-minute window.
@@ -291,7 +289,7 @@ def test_decisions_fire_again_after_reminder_elapses():
         "alerts": {"exhausted": [{"provider": "DeepSeek"}], "low": []},
         "provider_overview": [],
     }
-    settings = {"enabled": True, "levels": ["critical"], "reminder_enabled": True, "reminder_minutes": 60}
+    settings = {"enabled": True, "levels": ["critical"], "reminder_minutes": 60}
     first = _decisions(summary, [], settings, {"now": 1000, "cooldownMap": {}})
     # Second poll arrives 61 minutes later — past the reminder window.
     second = _decisions(summary, first["identity"], settings, {
@@ -302,14 +300,14 @@ def test_decisions_fire_again_after_reminder_elapses():
 
 
 def test_decisions_fire_exactly_once_when_reminder_disabled():
-    # Default behaviour: ``reminder_enabled`` is OFF, so a still-active
+    # Default behaviour: ``reminder_minutes`` is zero, so a still-active
     # alert notifies once and never repeats regardless of how many polls
-    # land. The operator must opt into repeats explicitly.
+    # land. The operator must set an interval to opt into repeats.
     summary = {
         "alerts": {"exhausted": [{"provider": "DeepSeek"}], "low": []},
         "provider_overview": [],
     }
-    settings = {"enabled": True, "levels": ["critical"], "reminder_enabled": False, "reminder_minutes": 5}
+    settings = {"enabled": True, "levels": ["critical"], "reminder_minutes": 0}
     first = _decisions(summary, [], settings, {"now": 1000, "cooldownMap": {}})
     # First poll fires (new identity) and seeds the cooldown map.
     assert first["fires"] == [{"level": "critical", "provider": "DeepSeek"}]
@@ -329,7 +327,7 @@ def test_decisions_skip_repeats_when_summary_unchanged():
         "alerts": {"exhausted": [{"provider": "DeepSeek"}], "low": []},
         "provider_overview": [],
     }
-    settings = {"enabled": True, "levels": ["critical"], "reminder_enabled": True, "reminder_minutes": 60}
+    settings = {"enabled": True, "levels": ["critical"], "reminder_minutes": 60}
     first = _decisions(summary, [], settings, {"now": 1000, "cooldownMap": {}})
     # Second poll arrives inside the reminder window — the operator keeps
     # the page open and the summary keeps reporting the same alert. No
@@ -346,7 +344,7 @@ def test_decisions_escalation_from_low_to_critical_fires():
         "alerts": {"exhausted": [{"provider": "DeepSeek"}], "low": []},
         "provider_overview": [],
     }
-    settings = {"enabled": True, "levels": ["critical", "low"], "reminder_enabled": True, "reminder_minutes": 60}
+    settings = {"enabled": True, "levels": ["critical", "low"], "reminder_minutes": 60}
     out = _decisions(summary, previous, settings, {"now": 2000, "cooldownMap": {}})
     # Same provider, but the level went critical — escalate fires once.
     assert out["fires"] == [{"level": "critical", "provider": "DeepSeek"}]
@@ -358,7 +356,7 @@ def test_decisions_downgrade_does_not_re_fire():
         "alerts": {"exhausted": [], "low": [{"provider": "DeepSeek"}]},
         "provider_overview": [],
     }
-    settings = {"enabled": True, "levels": ["critical", "low"], "reminder_enabled": True, "reminder_minutes": 60}
+    settings = {"enabled": True, "levels": ["critical", "low"], "reminder_minutes": 60}
     out = _decisions(summary, previous, settings, {"now": 2000, "cooldownMap": {}})
     # Going critical → low never re-fires. The operator already saw
     # the red alert when the outage started.
@@ -370,7 +368,7 @@ def test_decisions_clears_stale_cooldown_entries():
         "alerts": {"exhausted": [{"provider": "DeepSeek"}], "low": []},
         "provider_overview": [],
     }
-    settings = {"enabled": True, "levels": ["critical"], "reminder_enabled": True, "reminder_minutes": 60}
+    settings = {"enabled": True, "levels": ["critical"], "reminder_minutes": 60}
     # Previous identity: A was a critical provider. A is gone now.
     previous_identity = [
         {"level": "critical", "provider": "A"},
@@ -400,7 +398,7 @@ def test_decisions_stale_cooldown_can_fire_when_alert_returns():
         "alerts": {"exhausted": [{"provider": "A"}], "low": []},
         "provider_overview": [],
     }
-    settings = {"enabled": True, "levels": ["critical"], "reminder_enabled": True, "reminder_minutes": 60}
+    settings = {"enabled": True, "levels": ["critical"], "reminder_minutes": 60}
     # ``previous_identity`` is empty now (A cleared) and the cooldown map
     # must have been wiped on that transition. When A returns, it fires
     # again like a fresh identity.
@@ -445,8 +443,8 @@ def test_decisions_uses_defaults_when_settings_partial():
     }
     settings = {"enabled": True}  # no levels / no reminder_*
     out = _decisions(summary, [], settings, {"now": 1000, "cooldownMap": {}})
-    # Built-in defaults: enabled=True, levels=["critical"],
-    # reminder_enabled=False (so a new alert fires once and stops).
+    # Built-in defaults: enabled=True, levels=["critical"], and
+    # reminder_minutes=0 (so a new alert fires once and stops).
     assert out["fires"] == [{"level": "critical", "provider": "DeepSeek"}]
 
 
@@ -455,7 +453,7 @@ def test_decisions_filters_unknown_levels_silently():
         "alerts": {"exhausted": [{"provider": "DeepSeek"}], "low": []},
         "provider_overview": [],
     }
-    settings = {"enabled": True, "levels": ["bogus"], "reminder_enabled": True, "reminder_minutes": 60}
+    settings = {"enabled": True, "levels": ["bogus"], "reminder_minutes": 60}
     out = _decisions(summary, [], settings, {"now": 1000, "cooldownMap": {}})
     # Unknown levels collapse to the empty list — no alerts fire.
     assert out["fires"] == []
@@ -466,7 +464,7 @@ def test_decisions_returns_current_identity_even_when_no_fire():
         "alerts": {"exhausted": [{"provider": "DeepSeek"}], "low": []},
         "provider_overview": [],
     }
-    settings = {"enabled": True, "levels": ["critical"], "reminder_enabled": True, "reminder_minutes": 60}
+    settings = {"enabled": True, "levels": ["critical"], "reminder_minutes": 60}
     out = _decisions(summary, [], settings, {"now": 1000, "cooldownMap": {"critical|DeepSeek": 1000}})
     # Identity is exposed even when nothing fires; the dialog uses it
     # to keep the cooldown map in sync with the visible alert set.
@@ -513,18 +511,16 @@ def test_body_does_not_leak_provider_id_or_unrelated_fields():
 # ---------------------------------------------------------------------------
 
 
-def test_reminder_suffix_reads_off_when_disabled():
-    assert _suffix(60, False) == "Off"
-    assert _suffix(5, False) == "Off"
+def test_reminder_suffix_reads_off_at_zero_minutes():
+    assert _suffix(0) == "Off"
 
 
 def test_reminder_suffix_reads_on_for_a_positive_interval():
-    assert _suffix(5, True) == "On"
-    assert _suffix(60, True) == "On"
-    assert _suffix(1440, True) == "On"
+    assert _suffix(5) == "On"
+    assert _suffix(60) == "On"
+    assert _suffix(1440) == "On"
 
 
-def test_reminder_suffix_treats_zero_and_invalid_as_off():
-    assert _suffix(0, True) == "Off"
-    assert _suffix(-5, True) == "Off"
-    assert _suffix("nope", True) == "Off"
+def test_reminder_suffix_flags_negative_and_invalid_values():
+    assert _suffix(-5) == "Invalid"
+    assert _suffix("nope") == "Invalid"
