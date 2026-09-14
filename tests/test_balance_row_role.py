@@ -107,7 +107,7 @@ def test_unknown_role_falls_back_to_level_driven_class():
 
 
 def test_live_minimax_card_scenario():
-    """Reproduce the live evidence from the QC-014 task body: a primary
+    """Reproduce the live evidence from the operator report: a primary
     bucket with healthy windows but a fallback balance at amount=0 /
     level=exhausted. The helper must return the neutral suffix so the
     row drops the destructive tint even though level="exhausted"."""
