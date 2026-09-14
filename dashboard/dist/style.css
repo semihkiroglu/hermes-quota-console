@@ -835,8 +835,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  margin: 0 -6px 8px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   list-style: none;
+  transition: background 120ms ease;
+}
+
+.usages-settings-collapsible > .usages-settings-section-summary:hover {
+  background: var(--color-muted, rgba(127, 127, 127, 0.12));
 }
 
 .usages-settings-collapsible > .usages-settings-section-summary::-webkit-details-marker {
@@ -849,14 +857,16 @@
 
 .usages-settings-chevron {
   margin-left: auto;
-  font-size: 0.72rem;
-  color: var(--color-muted-foreground);
-  transform: rotate(-90deg);
+  font-size: 0.9rem;
+  line-height: 1;
+  color: var(--color-foreground, inherit);
+  opacity: 0.75;
+  transform: rotate(0deg);
   transition: transform 120ms ease;
 }
 
-.usages-settings-collapsible[open] .usages-settings-chevron {
-  transform: rotate(0deg);
+.usages-settings-collapsible:not([open]) .usages-settings-chevron {
+  transform: rotate(-90deg);
 }
 
 .usages-settings-field {
@@ -880,7 +890,7 @@
 
 .usages-settings-field-hint {
   margin: 4px 0 0;
-  font-size: 0.78rem;
+  font-size: 0.86rem;
   color: var(--color-muted-foreground);
   line-height: 1.35;
 }
@@ -1157,7 +1167,7 @@
 /* Explanatory copy under the reminder row: font size + colour come from
    .usages-settings-description so it matches the Global-defaults blurb. */
 .usages-settings-notifications-reminder-note {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
 }
 
 @media (max-width: 640px) {

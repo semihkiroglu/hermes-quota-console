@@ -449,16 +449,8 @@ function focusQuotaConsoleOnClick() {
 function reminderSuffix(minutes, enabled) {
   if (!enabled) return "Off";
   const total = Number(minutes);
-  if (!Number.isFinite(total) || total <= 0) return "";
-  if (total % 60 === 0) {
-    const hours = total / 60;
-    return hours === 1 ? "1 hour" : hours + " hours";
-  }
-  if (total > 60) {
-    const hours = Math.round((total / 60) * 10) / 10;
-    return hours + " hours";
-  }
-  return total + " min";
+  if (!Number.isFinite(total) || total <= 0) return "Off";
+  return "On";
 }
 
 // Build the title/body pair the Notification API consumes. Pure, so
@@ -1094,6 +1086,16 @@ function notificationBody(item) {
             }),
             h("span", null, "Remind me again"),
           ),
+          // The copy rides inside the row, under its label, exactly the way
+          // every Global-defaults row carries its own description.
+          h(
+            "p",
+            {
+              id: "usages-notifications-description",
+              className: "usages-settings-field-hint usages-settings-notifications-reminder-note",
+            },
+            "Notifications follow the existing alert set: a new alert fires once, repeats are off by default \u2014 turn on \u201cRemind me again\u201d to receive a reminder after the minutes you set.",
+          ),
         ),
         h(
           "div",
@@ -1119,17 +1121,6 @@ function notificationBody(item) {
             ),
           ),
         ),
-      ),
-      // Explanatory copy sits directly under the reminder row and matches
-      // the Global-defaults section description (font size + rhythm) so the
-      // two sections read with the same visual weight.
-      h(
-        "p",
-        {
-          id: "usages-notifications-description",
-          className: "usages-settings-description usages-settings-notifications-reminder-note",
-        },
-        "Notifications follow the existing alert set: a new alert fires once, repeats are off by default \u2014 turn on \u201cRemind me again\u201d to receive a reminder after the minutes you set.",
       ),
       h(
         "div",
@@ -1315,7 +1306,7 @@ function notificationBody(item) {
             "summary",
             { className: "usages-settings-section-summary" },
             h("span", { className: "usages-settings-section-title" }, "Global defaults"),
-            h("span", { className: "usages-settings-chevron", "aria-hidden": "true" }),
+            h("span", { className: "usages-settings-chevron", "aria-hidden": "true" }, "\u25be"),
           ),
           h(
             "p",
@@ -1355,7 +1346,7 @@ function notificationBody(item) {
             "summary",
             { className: "usages-settings-section-summary" },
             h("span", { className: "usages-settings-section-title" }, "Per-provider overrides"),
-            h("span", { className: "usages-settings-chevron", "aria-hidden": "true" }),
+            h("span", { className: "usages-settings-chevron", "aria-hidden": "true" }, "\u25be"),
           ),
           providers.length === 0
             ? h("p", { className: "usages-settings-empty" }, "No providers are loaded yet.")
