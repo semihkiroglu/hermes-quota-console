@@ -880,6 +880,9 @@ function notificationBody(item) {
 
     function updateEnabled(next) {
       setDraft(function (prev) { return Object.assign({}, prev, { enabled: next }); });
+      // Ticking the switch is a user gesture: ask for the browser permission
+      // right away rather than waiting for another click.
+      if (next && permission === "default") requestPermission();
     }
     function toggleLevel(level) {
       setDraft(function (prev) {
@@ -948,7 +951,8 @@ function notificationBody(item) {
         return;
       }
       if (window.Notification.permission !== "granted") {
-        setPermissionError("Enable browser notifications first to send a test.");
+        // Ask on the same click; the operator taps once more to see the test.
+        requestPermission();
         return;
       }
       try {
@@ -967,9 +971,8 @@ function notificationBody(item) {
 // Push draft up so the dialog body picks it up in the next PUT.
     // The save() handler below serialises ``props.draft`` — we copy ours
     // back into this.draft through props.onChange. The dependency list
-    // also refreshes the permission pill whenever any notification
-    // control changes — the operator can see the live grant state
-    // without clicking a separate Refresh button.
+    // also re-reads the permission whenever any notification control
+    // changes, so the controls reflect the live grant state.
     useEffect(function () {
       refreshPermission();
       if (typeof props.onChange === "function") {
@@ -997,28 +1000,23 @@ function notificationBody(item) {
       };
     }, []);
 
-    const permissionLabel = permission === "granted"
-      ? "Permission granted"
-      : permission === "denied"
-        ? "Permission denied"
-        : permission === "unsupported"
-          ? "Not supported in this browser"
-          : "Permission not requested";
-    const permissionClass = "usages-notifications-permission usages-notifications-permission--"
-      + permission.replace(/[^a-z0-9_-]/g, "unknown");
-
     return h(
       "details",
-      { className: "usages-settings-section usages-settings-notifications usages-settings-collapsible" },
+      {
+        className: "usages-settings-section usages-settings-notifications usages-settings-collapsible",
+        // Opening the section while notifications are already enabled is a
+        // user gesture — use it to ask for the browser permission instead of
+        // hiding the request behind a separate button.
+        onToggle: function (event) {
+          if (event.target.open && draft.enabled && permission === "default") {
+            requestPermission();
+          }
+        },
+      },
       h(
         "summary",
         { className: "usages-settings-section-summary" },
-        h(
-          "header",
-          { className: "usages-settings-notifications-header" },
-          h("h3", { className: "usages-settings-section-title" }, "Notifications"),
-          h("span", { className: permissionClass }, permissionLabel),
-        ),
+        h("span", { className: "usages-settings-section-title" }, "Notifications"),
         h("span", { className: "usages-settings-chevron", "aria-hidden": "true" }, "\u25be"),
       ),
       h(
@@ -1065,31 +1063,28 @@ function notificationBody(item) {
           );
         }),
       ),
+      // Deliberately the same row shape as the Global-defaults fields:
+      // label + hint on the left, the value control in the middle column,
+      // the derived state on the right.
       h(
         "div",
-        { className: "usages-settings-field usages-settings-notifications-reminder" },
+        { className: "usages-settings-field" },
         h(
           "div",
           { className: "usages-settings-field-label" },
-          h(
-            "span",
-            { className: "usages-settings-notifications-reminder-title" },
-            "Remind me again",
-          ),
-          // The copy rides inside the row, under its label, exactly the way
-          // every Global-defaults row carries its own description.
+          h("label", { htmlFor: "usages-notifications-reminder-input" }, "Remind me again"),
           h(
             "p",
             {
               id: "usages-notifications-description",
-              className: "usages-settings-field-hint usages-settings-notifications-reminder-note",
+              className: "usages-settings-field-hint",
             },
             "Repeat a still-active alert after this many minutes; zero switches repeats off.",
           ),
         ),
         h(
           "div",
-          { className: "usages-settings-field-input usages-settings-notifications-reminder-control" },
+          { className: "usages-settings-field-input" },
           h("input", {
             id: "usages-notifications-reminder-input",
             type: "number",
@@ -1097,23 +1092,28 @@ function notificationBody(item) {
             max: reminderMax,
             step: 1,
             value: draft.reminder_minutes,
+            placeholder: "e.g. 0",
             onChange: function (event) { updateReminderMinutes(event.target.value); },
             disabled: !draft.enabled,
-            "aria-label": "Remind me again after (minutes)",
             "aria-describedby": "usages-notifications-description",
           }),
-          h(
-            "span",
-            { className: "usages-settings-notifications-reminder-suffix" },
-            reminderSuffix(draft.reminder_minutes),
-          ),
+        ),
+        h(
+          "div",
+          { className: "usages-settings-field-current" },
+          reminderSuffix(draft.reminder_minutes),
         ),
       ),
       h(
         "div",
         { className: "usages-settings-notifications-actions" },
-        permission === "granted"
+        permission === "denied" || permission === "unsupported"
           ? h(
+              Button,
+              { type: "button", size: "sm", disabled: true },
+              "Browser blocks notifications",
+            )
+          : h(
               Button,
               {
                 type: "button",
@@ -1121,22 +1121,7 @@ function notificationBody(item) {
                 onClick: sendTestNotification,
               },
               "Send test notification",
-            )
-          : permission === "denied" || permission === "unsupported"
-            ? h(
-                Button,
-                { type: "button", size: "sm", disabled: true },
-                "Browser blocks notifications",
-              )
-            : h(
-                Button,
-                {
-                  type: "button",
-                  size: "sm",
-                  onClick: requestPermission,
-                },
-                "Enable browser notifications",
-              ),
+            ),
       ),
       permissionError
         ? h("p", { className: "usages-settings-error", role: "alert" }, permissionError)
