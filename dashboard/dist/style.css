@@ -829,6 +829,36 @@
   color: var(--color-muted-foreground);
 }
 
+/* Collapsible section headers: "Global defaults" and "Per-provider
+   overrides" fold away so the notifications stay in view. */
+.usages-settings-collapsible > .usages-settings-section-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.usages-settings-collapsible > .usages-settings-section-summary::-webkit-details-marker {
+  display: none;
+}
+
+.usages-settings-collapsible > .usages-settings-section-summary .usages-settings-section-title {
+  margin: 0;
+}
+
+.usages-settings-chevron {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--color-muted-foreground);
+  transform: rotate(-90deg);
+  transition: transform 120ms ease;
+}
+
+.usages-settings-collapsible[open] .usages-settings-chevron {
+  transform: rotate(0deg);
+}
+
 .usages-settings-field {
   display: grid;
   grid-template-columns: 1.4fr 1.1fr 1fr;
@@ -1077,18 +1107,10 @@
 }
 
 .usages-settings-notifications-reminder {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  align-items: start;
 }
 
-.usages-settings-notifications-reminder label {
-  flex: 1 1 auto;
-  font-size: 0.88rem;
-}
-
-.usages-settings-notifications-reminder input[type="number"] {
+.usages-settings-notifications-reminder-control input[type="number"] {
   width: 90px;
   padding: 6px 8px;
   border-radius: var(--radius-sm);
@@ -1099,17 +1121,30 @@
   text-align: right;
 }
 
-.usages-settings-notifications-reminder input[type="number"]:disabled {
+.usages-settings-notifications-reminder-control input[type="number"]:disabled {
   opacity: 0.55;
 }
 
 .usages-settings-notifications-reminder-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  font-size: 0.88rem;
   font-weight: 600;
   cursor: pointer;
-  flex: 0 0 auto;
+}
+
+.usages-settings-notifications-reminder-control {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.usages-settings-notifications-reminder-suffix {
+  min-width: 58px;
+  font-size: 0.78rem;
+  color: var(--color-muted-foreground);
 }
 
 .usages-settings-notifications-actions {
@@ -1119,10 +1154,10 @@
   flex-wrap: wrap;
 }
 
-.usages-settings-notifications-note {
-  margin: 0;
-  font-size: 0.78rem;
-  color: var(--color-muted-foreground);
+/* Explanatory copy under the reminder row: font size + colour come from
+   .usages-settings-description so it matches the Global-defaults blurb. */
+.usages-settings-notifications-reminder-note {
+  margin: 8px 0 0;
 }
 
 @media (max-width: 640px) {
