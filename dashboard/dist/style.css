@@ -1024,12 +1024,17 @@
 
 @media (max-width: 640px) {
   .usages-settings-overlay {
-    padding: 0;
+    /* The dashboard shell keeps its own fixed header (~56px) above the
+       overlay, so the sheet starts below it instead of colliding with it. */
+    padding: 56px 0 0;
   }
   .usages-settings-dialog {
     max-width: none;
     border-radius: 0;
-    min-height: 100vh;
+    /* dvh keeps mobile browser chrome from pushing the sheet past the
+       visible area. */
+    min-height: calc(100vh - 56px);
+    min-height: calc(100dvh - 56px);
   }
   .usages-settings-field {
     grid-template-columns: 1fr;
