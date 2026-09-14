@@ -423,6 +423,41 @@ function notificationDecisions(
 // the window — without this guard a single click reloads the page and
 // wipes the in-memory notification identity / cooldown map, which in
 // turn re-fires the same alert as soon as the next poll lands.
+// Service worker that renders every notification. Android Chrome throws on
+// ``new Notification(...)`` from a page ("Illegal constructor"), so the worker
+// is the only path that behaves the same on mobile and desktop.
+const NOTIFICATION_WORKER_URL = "/api/plugins/quota-console/sw.js";
+
+let notificationRegistration = null;
+
+function notificationWorker() {
+  if (notificationRegistration) return notificationRegistration;
+  if (typeof navigator === "undefined" || !navigator.serviceWorker
+      || typeof navigator.serviceWorker.register !== "function") {
+    notificationRegistration = Promise.resolve(null);
+    return notificationRegistration;
+  }
+  notificationRegistration = navigator.serviceWorker
+    .register(NOTIFICATION_WORKER_URL)
+    .catch(function () { return null; });
+  return notificationRegistration;
+}
+
+// Render one notification through the worker; browsers without service worker
+// support fall back to the page constructor, which still works on desktop.
+function showNotification(title, options) {
+  return notificationWorker().then(function (registration) {
+    if (registration && typeof registration.showNotification === "function") {
+      return registration.showNotification(title, options);
+    }
+    const note = new window.Notification(title, options);
+    if (note && typeof note.addEventListener === "function") {
+      note.addEventListener("click", focusQuotaConsoleOnClick);
+    }
+    return note;
+  });
+}
+
 function focusQuotaConsoleOnClick() {
   try {
     if (typeof window.focus === "function") window.focus();
@@ -880,6 +915,9 @@ function notificationBody(item) {
 
     function updateEnabled(next) {
       setDraft(function (prev) { return Object.assign({}, prev, { enabled: next }); });
+      // Ticking the switch is a user gesture: ask for the browser permission
+      // right away rather than waiting for another click.
+      if (next && permission === "default") requestPermission();
     }
     function toggleLevel(level) {
       setDraft(function (prev) {
@@ -948,28 +986,23 @@ function notificationBody(item) {
         return;
       }
       if (window.Notification.permission !== "granted") {
-        setPermissionError("Enable browser notifications first to send a test.");
+        // Ask on the same click; the operator taps once more to see the test.
+        requestPermission();
         return;
       }
-      try {
-        const test = new window.Notification("Quota Console notifications enabled", {
-          body: "You will see alerts here when the levels you selected fire.",
-          tag: "quota-console-test",
-        });
-        if (test && typeof test.addEventListener === "function") {
-          test.addEventListener("click", focusQuotaConsoleOnClick);
-        }
-      } catch (error) {
+      showNotification("Quota Console notifications enabled", {
+        body: "You will see alerts here when the levels you selected fire.",
+        tag: "quota-console-test",
+      }).catch(function () {
         setPermissionError("Could not send a test notification.");
-      }
+      });
     }
 
 // Push draft up so the dialog body picks it up in the next PUT.
     // The save() handler below serialises ``props.draft`` — we copy ours
     // back into this.draft through props.onChange. The dependency list
-    // also refreshes the permission pill whenever any notification
-    // control changes — the operator can see the live grant state
-    // without clicking a separate Refresh button.
+    // also re-reads the permission whenever any notification control
+    // changes, so the controls reflect the live grant state.
     useEffect(function () {
       refreshPermission();
       if (typeof props.onChange === "function") {
@@ -997,132 +1030,117 @@ function notificationBody(item) {
       };
     }, []);
 
-    const permissionLabel = permission === "granted"
-      ? "Permission granted"
-      : permission === "denied"
-        ? "Permission denied"
-        : permission === "unsupported"
-          ? "Not supported in this browser"
-          : "Permission not requested";
-    const permissionClass = "usages-notifications-permission usages-notifications-permission--"
-      + permission.replace(/[^a-z0-9_-]/g, "unknown");
-
     return h(
       "details",
-      { className: "usages-settings-section usages-settings-notifications usages-settings-collapsible" },
+      {
+        className: "usages-settings-section usages-settings-collapsible",
+        // Opening the section while notifications are already enabled is a
+        // user gesture — use it to ask for the browser permission instead of
+        // hiding the request behind a separate button.
+        onToggle: function (event) {
+          if (event.target.open && draft.enabled && permission === "default") {
+            requestPermission();
+          }
+        },
+      },
       h(
         "summary",
         { className: "usages-settings-section-summary" },
-        h(
-          "header",
-          { className: "usages-settings-notifications-header" },
-          h("h3", { className: "usages-settings-section-title" }, "Notifications"),
-          h("span", { className: permissionClass }, permissionLabel),
-        ),
+        h("span", { className: "usages-settings-section-title" }, "Notifications"),
         h("span", { className: "usages-settings-chevron", "aria-hidden": "true" }, "\u25be"),
       ),
       h(
-        "p",
-        { className: "usages-settings-description usages-settings-description--section" },
-        "Browser notifications are off until you turn them on. ",
-        "They only fire while this dashboard tab is open or in the background \u2014 ",
-        "closed tabs are out of scope for this version.",
-      ),
-      h(
-        "label",
-        { className: "usages-settings-notifications-toggle" },
-        h("input", {
-          type: "checkbox",
-          checked: Boolean(draft.enabled),
-          onChange: function (event) { updateEnabled(Boolean(event.target.checked)); },
-          "aria-describedby": "usages-notifications-description",
-        }),
-        h("span", null, "Enable browser notifications"),
-      ),
-      h(
-        "fieldset",
-        {
-          className: "usages-settings-notifications-levels",
-          disabled: !draft.enabled,
-          "aria-label": "Alert levels that fire a notification",
-        },
-        h("legend", { className: "usages-settings-field-hint" }, "Fire a notification for:"),
-        levels.map(function (level) {
-          const checked = draft.levels.indexOf(level) !== -1;
-          return h(
-            "label",
-            { key: level, className: "usages-settings-notifications-level" },
-            h("input", {
-              type: "checkbox",
-              checked: checked,
-              onChange: function () { toggleLevel(level); },
-            }),
-            h(
-              "span",
-              null,
-              level === "critical" ? "Critical (out of quota, rate-limited, auth failed)" : "Low (running low)",
-            ),
-          );
-        }),
-      ),
-      h(
         "div",
-        { className: "usages-settings-field usages-settings-notifications-reminder" },
+        { className: "usages-settings-notifications" },
         h(
-          "div",
-          { className: "usages-settings-field-label" },
-          h(
-            "span",
-            { className: "usages-settings-notifications-reminder-title" },
-            "Remind me again",
-          ),
-          // The copy rides inside the row, under its label, exactly the way
-          // every Global-defaults row carries its own description.
-          h(
-            "p",
-            {
-              id: "usages-notifications-description",
-              className: "usages-settings-field-hint usages-settings-notifications-reminder-note",
-            },
-            "Repeat a still-active alert after this many minutes; zero switches repeats off.",
-          ),
+          "p",
+          { className: "usages-settings-description usages-settings-description--section" },
+          "Browser notifications are off until you turn them on. ",
+          "They only fire while this dashboard tab is open or in the background \u2014 ",
+          "closed tabs are out of scope for this version.",
         ),
         h(
-          "div",
-          { className: "usages-settings-field-input usages-settings-notifications-reminder-control" },
+          "label",
+          { className: "usages-settings-notifications-toggle" },
           h("input", {
-            id: "usages-notifications-reminder-input",
-            type: "number",
-            min: reminderMin,
-            max: reminderMax,
-            step: 1,
-            value: draft.reminder_minutes,
-            onChange: function (event) { updateReminderMinutes(event.target.value); },
-            disabled: !draft.enabled,
-            "aria-label": "Remind me again after (minutes)",
+            type: "checkbox",
+            checked: Boolean(draft.enabled),
+            onChange: function (event) { updateEnabled(Boolean(event.target.checked)); },
             "aria-describedby": "usages-notifications-description",
           }),
+          h("span", null, "Enable browser notifications"),
+        ),
+        h(
+          "fieldset",
+          {
+            className: "usages-settings-notifications-levels",
+            disabled: !draft.enabled,
+            "aria-label": "Alert levels that fire a notification",
+          },
+          h("legend", { className: "usages-settings-field-hint" }, "Fire a notification for:"),
+          levels.map(function (level) {
+            const checked = draft.levels.indexOf(level) !== -1;
+            return h(
+              "label",
+              { key: level, className: "usages-settings-notifications-level" },
+              h("input", {
+                type: "checkbox",
+                checked: checked,
+                onChange: function () { toggleLevel(level); },
+              }),
+              h(
+                "span",
+                null,
+                level === "critical" ? "Critical (out of quota, rate-limited, auth failed)" : "Low (running low)",
+              ),
+            );
+          }),
+        ),
+        // Deliberately the same row shape as the Global-defaults fields:
+        // label + hint on the left, the value control in the middle column,
+        // the derived state on the right.
+        h(
+          "div",
+          { className: "usages-settings-field" },
           h(
-            "span",
-            { className: "usages-settings-notifications-reminder-suffix" },
+            "div",
+            { className: "usages-settings-field-label" },
+            h("label", { htmlFor: "usages-notifications-reminder-input" }, "Remind me again"),
+            h(
+              "p",
+              {
+                id: "usages-notifications-description",
+                className: "usages-settings-field-hint",
+              },
+              "Repeat a still-active alert after this many minutes; zero switches repeats off.",
+            ),
+          ),
+          h(
+            "div",
+            { className: "usages-settings-field-input" },
+            h("input", {
+              id: "usages-notifications-reminder-input",
+              type: "number",
+              min: reminderMin,
+              max: reminderMax,
+              step: 1,
+              value: draft.reminder_minutes,
+              placeholder: "e.g. 0",
+              onChange: function (event) { updateReminderMinutes(event.target.value); },
+              disabled: !draft.enabled,
+              "aria-describedby": "usages-notifications-description",
+            }),
+          ),
+          h(
+            "div",
+            { className: "usages-settings-field-current" },
             reminderSuffix(draft.reminder_minutes),
           ),
         ),
-      ),
-      h(
-        "div",
-        { className: "usages-settings-notifications-actions" },
-        permission === "granted"
-          ? h(
-              Button,
-              {
-                type: "button",
-                size: "sm",
-                onClick: sendTestNotification,
-              },
-              "Send test notification",
-            )
-          : permission === "denied" || permission === "unsupported"
+        h(
+          "div",
+          { className: "usages-settings-notifications-actions" },
+          permission === "denied" || permission === "unsupported"
             ? h(
                 Button,
                 { type: "button", size: "sm", disabled: true },
@@ -1133,14 +1151,15 @@ function notificationBody(item) {
                 {
                   type: "button",
                   size: "sm",
-                  onClick: requestPermission,
+                  onClick: sendTestNotification,
                 },
-                "Enable browser notifications",
+                "Send test notification",
               ),
+        ),
+        permissionError
+          ? h("p", { className: "usages-settings-error", role: "alert" }, permissionError)
+          : null,
       ),
-      permissionError
-        ? h("p", { className: "usages-settings-error", role: "alert" }, permissionError)
-        : null,
     );
   }
 
@@ -1432,19 +1451,14 @@ function notificationBody(item) {
       decision.fires.forEach(function (item) {
         const built = notificationBody(item);
         if (!built) return;
-        try {
-          const note = new window.Notification(built.title, {
-            body: built.body,
-            tag: "quota-console-" + item.level + "-" + item.provider,
-          });
-          if (note && typeof note.addEventListener === "function") {
-            note.addEventListener("click", focusQuotaConsoleOnClick);
-          }
-        } catch (error) {
-          // Some browsers throw on duplicate tags inside the cooldown
-          // window; swallow the failure and keep the cooldown map intact
-          // so the operator does not see duplicate toasts back-to-back.
-        }
+        // The worker carries the notification (Android Chrome rejects the
+        // page constructor); a rejected show — duplicate tag inside the
+        // cooldown window, or a revoked grant — stays quiet so the operator
+        // never sees back-to-back toasts for the same alert.
+        showNotification(built.title, {
+          body: built.body,
+          tag: "quota-console-" + item.level + "-" + item.provider,
+        }).catch(function () { /* stay quiet */ });
       });
     }
     return { identity: decision.identity, cooldownMap: decision.cooldownMap };

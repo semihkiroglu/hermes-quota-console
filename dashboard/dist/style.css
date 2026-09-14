@@ -835,7 +835,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 -6px 8px;
+  margin: 0 -6px;
   padding: 4px 6px;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -853,6 +853,16 @@
 
 .usages-settings-collapsible > .usages-settings-section-summary .usages-settings-section-title {
   margin: 0;
+}
+
+.usages-settings-collapsible[open] > .usages-settings-section-summary {
+  margin-bottom: 10px;
+}
+
+/* Section copy sits flush under its header so every section opens with the
+   same gap, whether or not it carries a description line. */
+.usages-settings-collapsible .usages-settings-description--section {
+  margin-top: 0;
 }
 
 .usages-settings-chevron {
@@ -1014,12 +1024,17 @@
 
 @media (max-width: 640px) {
   .usages-settings-overlay {
-    padding: 0;
+    /* The dashboard shell keeps its own fixed header (~56px) above the
+       overlay, so the sheet starts below it instead of colliding with it. */
+    padding: 56px 0 0;
   }
   .usages-settings-dialog {
     max-width: none;
     border-radius: 0;
-    min-height: 100vh;
+    /* dvh keeps mobile browser chrome from pushing the sheet past the
+       visible area. */
+    min-height: calc(100vh - 56px);
+    min-height: calc(100dvh - 56px);
   }
   .usages-settings-field {
     grid-template-columns: 1fr;
@@ -1037,26 +1052,6 @@
   gap: 12px;
 }
 
-.usages-settings-notifications-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.usages-notifications-permission {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-size: 0.74rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  background: var(--color-muted);
-  color: var(--color-muted-foreground);
-}
-
 .usages-notifications-permission::before {
   content: "";
   display: inline-block;
@@ -1067,22 +1062,7 @@
   opacity: 0.85;
 }
 
-.usages-notifications-permission--granted {
-  background: rgba(34, 197, 94, 0.16);
-  color: rgb(134, 239, 172);
-}
-
 .usages-notifications-permission--denied,
-.usages-notifications-permission--unsupported {
-  background: rgba(239, 68, 68, 0.16);
-  color: var(--color-destructive);
-}
-
-.usages-notifications-permission--default {
-  background: var(--color-muted);
-  color: var(--color-muted-foreground);
-}
-
 .usages-settings-notifications-toggle {
   display: inline-flex;
   align-items: center;
@@ -1116,43 +1096,6 @@
   font-size: 0.88rem;
 }
 
-.usages-settings-notifications-reminder {
-  align-items: start;
-}
-
-.usages-settings-notifications-reminder-control input[type="number"] {
-  width: 90px;
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-muted);
-  background: var(--color-input, transparent);
-  color: var(--color-foreground);
-  font: inherit;
-  text-align: right;
-}
-
-.usages-settings-notifications-reminder-control input[type="number"]:disabled {
-  opacity: 0.55;
-}
-
-.usages-settings-notifications-reminder-title {
-  font-size: 0.88rem;
-  font-weight: 600;
-}
-
-.usages-settings-notifications-reminder-control {
-  flex-direction: row;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-.usages-settings-notifications-reminder-suffix {
-  min-width: 58px;
-  font-size: 0.78rem;
-  color: var(--color-muted-foreground);
-}
-
 .usages-settings-notifications-actions {
   display: flex;
   align-items: center;
@@ -1160,11 +1103,6 @@
   flex-wrap: wrap;
 }
 
-/* Explanatory copy under the reminder row: font size + colour come from
-   .usages-settings-description so it matches the Global-defaults blurb. */
-.usages-settings-notifications-reminder-note {
-  margin: 6px 0 0;
-}
 
 @media (max-width: 640px) {
   .usages-page {
