@@ -59,7 +59,9 @@ bundle + `plugin_api.py` FastAPI router).
    docs — is English.
 8. Code changes ship with tests and the gate. **No PR without a green gate.**
 9. Coordination identifiers (kanban task ids, etc.) stay internal; they never
-   appear in user-facing code, comments, or UI text — user→actor language.
+   appear in user-facing code, comments, UI text, commit subjects, PR titles,
+   or release notes — user→actor language. Release notes are generated from
+   merged PR titles, so a task id in a title ends up in the changelog.
 10. The repo is public; `stable` and `unstable` have branch protection.
     `unstable` (default) is the contribution line: **PRs merge there after
     review**. `stable` is the maintainer-only release line: changes reach
