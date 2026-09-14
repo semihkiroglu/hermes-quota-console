@@ -855,14 +855,6 @@
   margin: 0;
 }
 
-/* A collapsed section is nothing but its header, so the headers keep the full
-   rhythm between them. An open section already ends with its own content —
-   there the divider carries the break, so the next header gets no extra
-   margin on top of its own padding. */
-.usages-settings-collapsible[open] + .usages-settings-section {
-  margin-top: 0;
-}
-
 .usages-settings-collapsible[open] > .usages-settings-section-summary {
   margin-bottom: 10px;
 }
