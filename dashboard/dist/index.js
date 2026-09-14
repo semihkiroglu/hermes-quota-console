@@ -1003,7 +1003,7 @@ function notificationBody(item) {
     return h(
       "details",
       {
-        className: "usages-settings-section usages-settings-notifications usages-settings-collapsible",
+        className: "usages-settings-section usages-settings-collapsible",
         // Opening the section while notifications are already enabled is a
         // user gesture — use it to ask for the browser permission instead of
         // hiding the request behind a separate button.
@@ -1020,112 +1020,116 @@ function notificationBody(item) {
         h("span", { className: "usages-settings-chevron", "aria-hidden": "true" }, "\u25be"),
       ),
       h(
-        "p",
-        { className: "usages-settings-description usages-settings-description--section" },
-        "Browser notifications are off until you turn them on. ",
-        "They only fire while this dashboard tab is open or in the background \u2014 ",
-        "closed tabs are out of scope for this version.",
-      ),
-      h(
-        "label",
-        { className: "usages-settings-notifications-toggle" },
-        h("input", {
-          type: "checkbox",
-          checked: Boolean(draft.enabled),
-          onChange: function (event) { updateEnabled(Boolean(event.target.checked)); },
-          "aria-describedby": "usages-notifications-description",
-        }),
-        h("span", null, "Enable browser notifications"),
-      ),
-      h(
-        "fieldset",
-        {
-          className: "usages-settings-notifications-levels",
-          disabled: !draft.enabled,
-          "aria-label": "Alert levels that fire a notification",
-        },
-        h("legend", { className: "usages-settings-field-hint" }, "Fire a notification for:"),
-        levels.map(function (level) {
-          const checked = draft.levels.indexOf(level) !== -1;
-          return h(
-            "label",
-            { key: level, className: "usages-settings-notifications-level" },
-            h("input", {
-              type: "checkbox",
-              checked: checked,
-              onChange: function () { toggleLevel(level); },
-            }),
-            h(
-              "span",
-              null,
-              level === "critical" ? "Critical (out of quota, rate-limited, auth failed)" : "Low (running low)",
-            ),
-          );
-        }),
-      ),
-      // Deliberately the same row shape as the Global-defaults fields:
-      // label + hint on the left, the value control in the middle column,
-      // the derived state on the right.
-      h(
         "div",
-        { className: "usages-settings-field" },
+        { className: "usages-settings-notifications" },
+        h(
+          "p",
+          { className: "usages-settings-description usages-settings-description--section" },
+          "Browser notifications are off until you turn them on. ",
+          "They only fire while this dashboard tab is open or in the background \u2014 ",
+          "closed tabs are out of scope for this version.",
+        ),
+        h(
+          "label",
+          { className: "usages-settings-notifications-toggle" },
+          h("input", {
+            type: "checkbox",
+            checked: Boolean(draft.enabled),
+            onChange: function (event) { updateEnabled(Boolean(event.target.checked)); },
+            "aria-describedby": "usages-notifications-description",
+          }),
+          h("span", null, "Enable browser notifications"),
+        ),
+        h(
+          "fieldset",
+          {
+            className: "usages-settings-notifications-levels",
+            disabled: !draft.enabled,
+            "aria-label": "Alert levels that fire a notification",
+          },
+          h("legend", { className: "usages-settings-field-hint" }, "Fire a notification for:"),
+          levels.map(function (level) {
+            const checked = draft.levels.indexOf(level) !== -1;
+            return h(
+              "label",
+              { key: level, className: "usages-settings-notifications-level" },
+              h("input", {
+                type: "checkbox",
+                checked: checked,
+                onChange: function () { toggleLevel(level); },
+              }),
+              h(
+                "span",
+                null,
+                level === "critical" ? "Critical (out of quota, rate-limited, auth failed)" : "Low (running low)",
+              ),
+            );
+          }),
+        ),
+        // Deliberately the same row shape as the Global-defaults fields:
+        // label + hint on the left, the value control in the middle column,
+        // the derived state on the right.
         h(
           "div",
-          { className: "usages-settings-field-label" },
-          h("label", { htmlFor: "usages-notifications-reminder-input" }, "Remind me again"),
+          { className: "usages-settings-field" },
           h(
-            "p",
-            {
-              id: "usages-notifications-description",
-              className: "usages-settings-field-hint",
-            },
-            "Repeat a still-active alert after this many minutes; zero switches repeats off.",
+            "div",
+            { className: "usages-settings-field-label" },
+            h("label", { htmlFor: "usages-notifications-reminder-input" }, "Remind me again"),
+            h(
+              "p",
+              {
+                id: "usages-notifications-description",
+                className: "usages-settings-field-hint",
+              },
+              "Repeat a still-active alert after this many minutes; zero switches repeats off.",
+            ),
+          ),
+          h(
+            "div",
+            { className: "usages-settings-field-input" },
+            h("input", {
+              id: "usages-notifications-reminder-input",
+              type: "number",
+              min: reminderMin,
+              max: reminderMax,
+              step: 1,
+              value: draft.reminder_minutes,
+              placeholder: "e.g. 0",
+              onChange: function (event) { updateReminderMinutes(event.target.value); },
+              disabled: !draft.enabled,
+              "aria-describedby": "usages-notifications-description",
+            }),
+          ),
+          h(
+            "div",
+            { className: "usages-settings-field-current" },
+            reminderSuffix(draft.reminder_minutes),
           ),
         ),
         h(
           "div",
-          { className: "usages-settings-field-input" },
-          h("input", {
-            id: "usages-notifications-reminder-input",
-            type: "number",
-            min: reminderMin,
-            max: reminderMax,
-            step: 1,
-            value: draft.reminder_minutes,
-            placeholder: "e.g. 0",
-            onChange: function (event) { updateReminderMinutes(event.target.value); },
-            disabled: !draft.enabled,
-            "aria-describedby": "usages-notifications-description",
-          }),
+          { className: "usages-settings-notifications-actions" },
+          permission === "denied" || permission === "unsupported"
+            ? h(
+                Button,
+                { type: "button", size: "sm", disabled: true },
+                "Browser blocks notifications",
+              )
+            : h(
+                Button,
+                {
+                  type: "button",
+                  size: "sm",
+                  onClick: sendTestNotification,
+                },
+                "Send test notification",
+              ),
         ),
-        h(
-          "div",
-          { className: "usages-settings-field-current" },
-          reminderSuffix(draft.reminder_minutes),
-        ),
+        permissionError
+          ? h("p", { className: "usages-settings-error", role: "alert" }, permissionError)
+          : null,
       ),
-      h(
-        "div",
-        { className: "usages-settings-notifications-actions" },
-        permission === "denied" || permission === "unsupported"
-          ? h(
-              Button,
-              { type: "button", size: "sm", disabled: true },
-              "Browser blocks notifications",
-            )
-          : h(
-              Button,
-              {
-                type: "button",
-                size: "sm",
-                onClick: sendTestNotification,
-              },
-              "Send test notification",
-            ),
-      ),
-      permissionError
-        ? h("p", { className: "usages-settings-error", role: "alert" }, permissionError)
-        : null,
     );
   }
 
