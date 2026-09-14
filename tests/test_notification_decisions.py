@@ -102,6 +102,16 @@ def _body(item):
     return json.loads(_node_call(script))
 
 
+def _suffix(minutes, enabled):
+    payload = json.dumps({"minutes": minutes, "enabled": enabled})
+    script = (
+        _bundle_loader()
+        + "const input = JSON.parse(%r);\n" % payload
+        + "process.stdout.write(JSON.stringify(m.exports.reminderSuffix(input.minutes, input.enabled)));"
+    )
+    return json.loads(_node_call(script))
+
+
 # ---------------------------------------------------------------------------
 # notificationAlertIdentity
 # ---------------------------------------------------------------------------
@@ -496,3 +506,31 @@ def test_body_does_not_leak_provider_id_or_unrelated_fields():
     assert "amount" not in out["body"]
     assert "1000" not in out["body"]
     assert "weird" not in out["body"]
+
+
+# ---------------------------------------------------------------------------
+# reminderSuffix
+# ---------------------------------------------------------------------------
+
+
+def test_reminder_suffix_reads_off_when_disabled():
+    assert _suffix(60, False) == "Off"
+    assert _suffix(5, False) == "Off"
+
+
+def test_reminder_suffix_formats_minutes_below_an_hour():
+    assert _suffix(5, True) == "5 min"
+    assert _suffix(45, True) == "45 min"
+
+
+def test_reminder_suffix_formats_whole_and_fractional_hours():
+    assert _suffix(60, True) == "1 hour"
+    assert _suffix(90, True) == "1.5 hours"
+    assert _suffix(120, True) == "2 hours"
+    assert _suffix(1440, True) == "24 hours"
+
+
+def test_reminder_suffix_returns_empty_for_invalid_values():
+    assert _suffix(0, True) == ""
+    assert _suffix(-5, True) == ""
+    assert _suffix("nope", True) == ""

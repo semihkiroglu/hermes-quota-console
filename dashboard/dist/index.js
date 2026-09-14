@@ -441,6 +441,26 @@ function focusQuotaConsoleOnClick() {
   } catch (error) { /* navigation is best-effort */ }
 }
 
+// Short, human-readable suffix rendered to the right of the minutes input
+// ("60" -> "1 hour", "90" -> "1.5 hours"). ``enabled`` is the effective
+// state (master toggle AND the reminder switch) so the row reads "Off"
+// whenever no reminder would fire. Pure: the Node fixtures assert the
+// formatting without a DOM.
+function reminderSuffix(minutes, enabled) {
+  if (!enabled) return "Off";
+  const total = Number(minutes);
+  if (!Number.isFinite(total) || total <= 0) return "";
+  if (total % 60 === 0) {
+    const hours = total / 60;
+    return hours === 1 ? "1 hour" : hours + " hours";
+  }
+  if (total > 60) {
+    const hours = Math.round((total / 60) * 10) / 10;
+    return hours + " hours";
+  }
+  return total + " min";
+}
+
 // Build the title/body pair the Notification API consumes. Pure, so
 // Node tests assert the copy without a fake DOM.
 function notificationBody(item) {
@@ -1015,7 +1035,7 @@ function notificationBody(item) {
       ),
       h(
         "p",
-        { className: "usages-settings-field-hint" },
+        { className: "usages-settings-description usages-settings-description--section" },
         "Browser notifications are off until you turn them on. ",
         "They only fire while this dashboard tab is open or in the background \u2014 ",
         "closed tabs are out of scope for this version.",
@@ -1059,34 +1079,57 @@ function notificationBody(item) {
       ),
       h(
         "div",
-        { className: "usages-settings-notifications-reminder" },
+        { className: "usages-settings-field usages-settings-notifications-reminder" },
         h(
-          "label",
-          { className: "usages-settings-notifications-reminder-toggle" },
+          "div",
+          { className: "usages-settings-field-label" },
+          h(
+            "label",
+            { className: "usages-settings-notifications-reminder-toggle" },
+            h("input", {
+              type: "checkbox",
+              checked: Boolean(draft.reminder_enabled),
+              onChange: function (event) { toggleReminderEnabled(Boolean(event.target.checked)); },
+              "aria-describedby": "usages-notifications-description",
+            }),
+            h("span", null, "Remind me again"),
+          ),
+        ),
+        h(
+          "div",
+          { className: "usages-settings-field-input usages-settings-notifications-reminder-control" },
           h("input", {
-            type: "checkbox",
-            checked: Boolean(draft.reminder_enabled),
-            onChange: function (event) { toggleReminderEnabled(Boolean(event.target.checked)); },
+            id: "usages-notifications-reminder-input",
+            type: "number",
+            min: reminderMin,
+            max: reminderMax,
+            step: 1,
+            value: draft.reminder_minutes,
+            onChange: function (event) { updateReminderMinutes(event.target.value); },
+            disabled: !draft.enabled || !draft.reminder_enabled,
+            "aria-label": "Remind me again after (minutes)",
             "aria-describedby": "usages-notifications-description",
           }),
-          h("span", null, "Remind me again"),
+          h(
+            "span",
+            { className: "usages-settings-notifications-reminder-suffix" },
+            reminderSuffix(
+              draft.reminder_minutes,
+              Boolean(draft.enabled) && Boolean(draft.reminder_enabled),
+            ),
+          ),
         ),
-        h(
-          "label",
-          { htmlFor: "usages-notifications-reminder-input" },
-          "Remind me again after (minutes)",
-        ),
-        h("input", {
-          id: "usages-notifications-reminder-input",
-          type: "number",
-          min: reminderMin,
-          max: reminderMax,
-          step: 1,
-          value: draft.reminder_minutes,
-          onChange: function (event) { updateReminderMinutes(event.target.value); },
-          disabled: !draft.enabled || !draft.reminder_enabled,
-          "aria-describedby": "usages-notifications-description",
-        }),
+      ),
+      // Explanatory copy sits directly under the reminder row and matches
+      // the Global-defaults section description (font size + rhythm) so the
+      // two sections read with the same visual weight.
+      h(
+        "p",
+        {
+          id: "usages-notifications-description",
+          className: "usages-settings-description usages-settings-notifications-reminder-note",
+        },
+        "Notifications follow the existing alert set: a new alert fires once, repeats are off by default \u2014 turn on \u201cRemind me again\u201d to receive a reminder after the minutes you set.",
       ),
       h(
         "div",
@@ -1120,11 +1163,6 @@ function notificationBody(item) {
       permissionError
         ? h("p", { className: "usages-settings-error", role: "alert" }, permissionError)
         : null,
-      h(
-        "p",
-        { id: "usages-notifications-description", className: "usages-settings-notifications-note" },
-        "Notifications follow the existing alert set: a new alert fires once, repeats are off by default \u2014 turn on \u201cRemind me again\u201d to receive a reminder after the minutes you set.",
-      ),
     );
   }
 
@@ -1271,9 +1309,14 @@ function notificationBody(item) {
           },
         ),
         h(
-          "section",
-          { className: "usages-settings-section" },
-          h("h3", { className: "usages-settings-section-title" }, "Global defaults"),
+          "details",
+          { className: "usages-settings-section usages-settings-collapsible", open: true },
+          h(
+            "summary",
+            { className: "usages-settings-section-summary" },
+            h("span", { className: "usages-settings-section-title" }, "Global defaults"),
+            h("span", { className: "usages-settings-chevron", "aria-hidden": "true" }),
+          ),
           h(
             "p",
             { className: "usages-settings-description usages-settings-description--section" },
@@ -1306,9 +1349,14 @@ function notificationBody(item) {
           }),
         ),
         h(
-          "section",
-          { className: "usages-settings-section" },
-          h("h3", { className: "usages-settings-section-title" }, "Per-provider overrides"),
+          "details",
+          { className: "usages-settings-section usages-settings-collapsible", open: true },
+          h(
+            "summary",
+            { className: "usages-settings-section-summary" },
+            h("span", { className: "usages-settings-section-title" }, "Per-provider overrides"),
+            h("span", { className: "usages-settings-chevron", "aria-hidden": "true" }),
+          ),
           providers.length === 0
             ? h("p", { className: "usages-settings-empty" }, "No providers are loaded yet.")
             : providers.map(function (provider) {
@@ -2335,5 +2383,6 @@ if (typeof module !== "undefined" && module && module.exports) {
     notificationAlertIdentity: notificationAlertIdentity,
     notificationDecisions: notificationDecisions,
     notificationBody: notificationBody,
+    reminderSuffix: reminderSuffix,
   };
 }
