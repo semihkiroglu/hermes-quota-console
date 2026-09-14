@@ -423,6 +423,41 @@ function notificationDecisions(
 // the window — without this guard a single click reloads the page and
 // wipes the in-memory notification identity / cooldown map, which in
 // turn re-fires the same alert as soon as the next poll lands.
+// Service worker that renders every notification. Android Chrome throws on
+// ``new Notification(...)`` from a page ("Illegal constructor"), so the worker
+// is the only path that behaves the same on mobile and desktop.
+const NOTIFICATION_WORKER_URL = "/api/plugins/quota-console/dist/sw.js";
+
+let notificationRegistration = null;
+
+function notificationWorker() {
+  if (notificationRegistration) return notificationRegistration;
+  if (typeof navigator === "undefined" || !navigator.serviceWorker
+      || typeof navigator.serviceWorker.register !== "function") {
+    notificationRegistration = Promise.resolve(null);
+    return notificationRegistration;
+  }
+  notificationRegistration = navigator.serviceWorker
+    .register(NOTIFICATION_WORKER_URL)
+    .catch(function () { return null; });
+  return notificationRegistration;
+}
+
+// Render one notification through the worker; browsers without service worker
+// support fall back to the page constructor, which still works on desktop.
+function showNotification(title, options) {
+  return notificationWorker().then(function (registration) {
+    if (registration && typeof registration.showNotification === "function") {
+      return registration.showNotification(title, options);
+    }
+    const note = new window.Notification(title, options);
+    if (note && typeof note.addEventListener === "function") {
+      note.addEventListener("click", focusQuotaConsoleOnClick);
+    }
+    return note;
+  });
+}
+
 function focusQuotaConsoleOnClick() {
   try {
     if (typeof window.focus === "function") window.focus();
@@ -955,17 +990,12 @@ function notificationBody(item) {
         requestPermission();
         return;
       }
-      try {
-        const test = new window.Notification("Quota Console notifications enabled", {
-          body: "You will see alerts here when the levels you selected fire.",
-          tag: "quota-console-test",
-        });
-        if (test && typeof test.addEventListener === "function") {
-          test.addEventListener("click", focusQuotaConsoleOnClick);
-        }
-      } catch (error) {
+      showNotification("Quota Console notifications enabled", {
+        body: "You will see alerts here when the levels you selected fire.",
+        tag: "quota-console-test",
+      }).catch(function () {
         setPermissionError("Could not send a test notification.");
-      }
+      });
     }
 
 // Push draft up so the dialog body picks it up in the next PUT.
@@ -1421,19 +1451,14 @@ function notificationBody(item) {
       decision.fires.forEach(function (item) {
         const built = notificationBody(item);
         if (!built) return;
-        try {
-          const note = new window.Notification(built.title, {
-            body: built.body,
-            tag: "quota-console-" + item.level + "-" + item.provider,
-          });
-          if (note && typeof note.addEventListener === "function") {
-            note.addEventListener("click", focusQuotaConsoleOnClick);
-          }
-        } catch (error) {
-          // Some browsers throw on duplicate tags inside the cooldown
-          // window; swallow the failure and keep the cooldown map intact
-          // so the operator does not see duplicate toasts back-to-back.
-        }
+        // The worker carries the notification (Android Chrome rejects the
+        // page constructor); a rejected show — duplicate tag inside the
+        // cooldown window, or a revoked grant — stays quiet so the operator
+        // never sees back-to-back toasts for the same alert.
+        showNotification(built.title, {
+          body: built.body,
+          tag: "quota-console-" + item.level + "-" + item.provider,
+        }).catch(function () { /* stay quiet */ });
       });
     }
     return { identity: decision.identity, cooldownMap: decision.cooldownMap };
