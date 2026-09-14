@@ -65,6 +65,23 @@ function partitionBuckets(buckets, isHiddenFn) {
   return { visible: visible, hidden: hidden };
 }
 
+// Pure helper for the dashboard bundle's balance-row className decision.
+// Returns the CSS className suffix a balance row should render with given
+// the item's source role and its computed alert level. A fallback item
+// never raises an alert (AGENTS rule 5) so the role trumps the level:
+// fallback rows render the neutral style regardless of the level the
+// alarm layer computed. Exposed at module scope so the test suite can
+// exercise the same decision the browser renders with.
+function balanceRowClass(role, level) {
+  const normalized = String(level || "").trim().toLowerCase();
+  const levelSuffix =
+    normalized === "low" || normalized === "exhausted" || normalized === "unknown"
+      ? "usages-level--" + normalized
+      : "";
+  if (role === "fallback") return "";
+  return levelSuffix;
+}
+
 // Apply a stored provider-card order to a bucket list. Buckets whose id
 // appears in ``orderIds`` sort by their stored position; buckets missing
 // from the order (newly configured providers) keep their backend order
@@ -481,6 +498,16 @@ function notificationBody(item) {
     return "";
   }
 
+  // Compute the className suffix a balance row should render with given
+  // its source role and computed alert level. Pure helper so the test
+  // suite can assert the fallback-vs-primary decision without spinning up
+  // a fake React SDK. The browser's BalanceRow uses the same rule:
+  // fallback rows drop the level modifier entirely (they stay neutral),
+  // primary rows keep it.
+  function balanceRowClass(role, level) {
+    if (role === "fallback") return levelClass(""); // neutral — role trumps level
+    return levelClass(level);
+  }
   function formatCount(value) {
     if (typeof value !== "number" || !Number.isFinite(value)) return "";
     return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
@@ -596,12 +623,13 @@ function notificationBody(item) {
             }).format(props.balance.amount)
             : formatCount(props.balance.amount)
         : "Unavailable";
-    // Alert layer: tint the row when the balance is low or exhausted.
-    // Fallback balances (the wallet behind a still-healthy plan) can also be
-    // low/exhausted without changing the bucket alert — the row colour just
-    // surfaces that the value itself is below threshold; the bucket level
-    // and top alerts remain driven by primary sources only.
-    const levelModifier = levelClass(props.balance.level);
+    // Alert layer: tint the row when the balance is primary and its level
+    // is low/exhausted/unknown. A fallback balance (the wallet behind a
+    // still-healthy plan) never raises an alert per AGENTS rule 5, so its
+    // computed ``level`` is informational only and must not surface as a
+    // red destructive tint while the primary source is healthy. The bucket
+    // level and the top alerts remain driven by primary sources only.
+    const levelModifier = balanceRowClass(props.balance.role, props.balance.level);
     const className = "usages-balance" + (levelModifier ? " " + levelModifier : "");
     const attributes = { className: className };
     if (props.balance.role) attributes["data-role"] = props.balance.role;
@@ -2200,6 +2228,7 @@ if (typeof module !== "undefined" && module && module.exports) {
     partitionBuckets: partitionBuckets,
     applyStoredOrder: applyStoredOrder,
     moveProviderId: moveProviderId,
+    balanceRowClass: balanceRowClass,
     bannerAlertFromSummary: bannerAlertFromSummary,
     releaseUpdate: releaseUpdate,
     notificationAlertIdentity: notificationAlertIdentity,
