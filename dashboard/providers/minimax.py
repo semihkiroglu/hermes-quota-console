@@ -103,21 +103,28 @@ def fetch(context: ProviderContext) -> Optional[dict[str, Any]]:
         )
     if not card["windows"]:
         card["notice"] = "No quota window reported."
-    # The Token Plan quota endpoint does not include the credit wallet shown
-    # in the web console. ``query_balance`` is the API-key endpoint for that
-    # wallet; keep it best-effort so a balance API regression does not hide
-    # otherwise valid quota windows.
-    try:
-        balance_payload = context.get_json(
-            _BALANCE_ENDPOINT,
-            token,
-            headers={"Content-Type": "application/json"},
+    # ``query_balance`` belongs to MiniMax's standard PAYG API key. A Token
+    # Plan/Subscription Key can answer the quota endpoint but returns an
+    # unrelated zero wallet here; rendering that as the plan's credit balance
+    # is misleading. The web-console gift/recharge breakdown requires a
+    # browser login and is intentionally outside this server-side adapter.
+    if _is_standard_api_key(token):
+        try:
+            balance_payload = context.get_json(
+                _BALANCE_ENDPOINT,
+                token,
+                headers={"Content-Type": "application/json"},
+            )
+        except Exception:
+            balance_payload = None
+        credit_balance = _credit_balance(balance_payload)
+        if credit_balance is not None:
+            card["balances"].append(credit_balance)
+    else:
+        card["notice"] = (
+            "MiniMax web-console credit details are not available through "
+            "the configured Subscription Key."
         )
-    except Exception:
-        balance_payload = None
-    credit_balance = _credit_balance(balance_payload)
-    if credit_balance is not None:
-        card["balances"].append(credit_balance)
     return card
 
 
@@ -142,6 +149,11 @@ def _plan_name(payload: dict[str, Any], item: dict[str, Any]) -> Optional[str]:
             if text and len(text) <= 80:
                 return text
     return None
+
+
+def _is_standard_api_key(token: str) -> bool:
+    """Return whether MiniMax will treat the key as a PAYG API key."""
+    return token.startswith("sk-api-")
 
 
 def _credit_balance(payload: Any) -> Optional[dict[str, Any]]:

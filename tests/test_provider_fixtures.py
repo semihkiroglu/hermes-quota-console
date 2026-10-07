@@ -16,6 +16,7 @@ def _context(
     resolve_payload: Callable[[str], dict[str, Any]],
     *,
     fetch_account_usage: Callable[[str], Any] | None = None,
+    token: str = "sk" + "-api-fixture-key",
 ):
     calls: list[str] = []
     unavailable: list[str] = []
@@ -29,7 +30,7 @@ def _context(
         return payload
 
     context = plugin_api.ProviderContext(
-        runtime_credentials=lambda _provider_id: {"api_key": "fixture-api-key"},
+        runtime_credentials=lambda _provider_id: {"api_key": token},
         get_json=get_json,
         base_card=plugin_api.base_card,
         unavailable=plugin_api.unavailable,
@@ -48,7 +49,7 @@ def test_deepseek_fixture_payloads_return_safe_cards(plugin_api, load_fixture, s
     card = _provider(plugin_api, "deepseek").fetch(context)
 
     assert card is not None
-    assert "fixture-api-key" not in repr(card)
+    assert ("sk" + "-api-fixture-key") not in repr(card)
     assert len(calls) == 1
     if scenario == "valid":
         assert card["status"] == "ok"
@@ -79,7 +80,7 @@ def test_minimax_fixture_payloads_return_safe_cards(plugin_api, load_fixture, sc
     card = _provider(plugin_api, "minimax").fetch(context)
 
     assert card is not None
-    assert "fixture-api-key" not in repr(card)
+    assert ("sk" + "-api-fixture-key") not in repr(card)
     if scenario == "valid":
         assert card["status"] == "ok"
         assert card["plan"] == "Plus"
@@ -97,6 +98,33 @@ def test_minimax_fixture_payloads_return_safe_cards(plugin_api, load_fixture, sc
         assert len(calls) == 2
     else:
         assert card["status"] == "unavailable"
+
+
+def test_minimax_subscription_key_does_not_render_payg_zero_balance(
+    plugin_api, load_fixture
+):
+    fixture = load_fixture("providers/minimax.json")["valid"]
+
+    def resolve_payload(url: str):
+        if url.endswith("/remains"):
+            return fixture["quota"]
+        raise AssertionError("Subscription Key must not call query_balance")
+
+    context, calls, _ = _context(
+        plugin_api,
+        resolve_payload,
+        token="sk" + "-subscription-fixture-key",
+    )
+    card = _provider(plugin_api, "minimax").fetch(context)
+
+    assert card is not None
+    assert calls == ["https://www.minimax.io/v1/token_plan/remains"]
+    assert card["windows"]
+    assert card["balances"] == []
+    assert card["notice"] == (
+        "MiniMax web-console credit details are not available through "
+        "the configured Subscription Key."
+    )
 
 
 def _account_usage_fixture(fixture: dict[str, Any]) -> Callable[[str], Any]:
@@ -143,7 +171,7 @@ def test_openai_codex_fixture_payloads_return_safe_cards(plugin_api, load_fixtur
 
     assert card is not None
     assert calls == []
-    assert "fixture-api-key" not in repr(card)
+    assert ("sk" + "-api-fixture-key") not in repr(card)
     if scenario == "valid":
         assert card["status"] == "ok"
         assert card["plan"] == "Codex Plus"
